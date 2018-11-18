@@ -1,6 +1,6 @@
 open Utils
 open Proto
-open Lex
+open Scan
 
 type 'a psr = (int * token) Stream.t -> 'a
 
@@ -54,11 +54,11 @@ let token : token -> unit psr = fun t -> () <$ token_if ((=) t)
 
 
 (* Grammar *)
-let is_key      = function Lex.Key      _ -> true | _ -> false
-let is_exchange = function Lex.Exchange _ -> true | _ -> false
-let to_action   = function Lex.Key      k -> Proto.Key      k
-                         | Lex.Exchange e -> Proto.Exchange e
-                         | _              -> raise (Invalid_argument"to_action")
+let is_key      = function Scan.Key      _ -> true | _ -> false
+let is_exchange = function Scan.Exchange _ -> true | _ -> false
+let to_action   = function Scan.Key      k -> Proto.Key      k
+                         | Scan.Exchange e -> Proto.Exchange e
+                         | _               -> raise(Invalid_argument"to_action")
 
 let key            = to_action <$> token_if is_key
 let exchange       = to_action <$> token_if is_exchange
