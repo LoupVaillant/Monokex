@@ -100,7 +100,7 @@ let check_alternation : message list -> unit =
     | _                  -> error ("Messages must alternate directions," ^
                                      "initiator first")
   in fun messages ->
-     ignore (List.fold_left alternation (Client []) messages)
+     ignore (List.fold_left alternation (Server []) messages)
 
 let run_protocol : protocol -> unit = fun (pre, run) ->
   let init = { shared      = { client_s = false
