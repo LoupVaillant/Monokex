@@ -1,6 +1,10 @@
-open Utils
 open Proto
 open Scan
+
+(* higher order utilities *)
+let const x y   = x
+let swap  f x y = f y x
+let cons  x l   = x :: l
 
 type 'a psr = (int * token) Stream.t -> 'a
 
