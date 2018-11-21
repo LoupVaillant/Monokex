@@ -1,4 +1,3 @@
-open Utils
 open Proto
 
 let validate str =
@@ -8,30 +7,19 @@ let validate str =
   |> Parsec.parse
   |> Validate.v
 
-let a = validate
-          "<- s
-           ...
-           -> e
-           <- e, ee, es
-           -> s, se"
-
-let b = validate
-          "-> e
-           <- e, ee, es
-           -> s, se"
-
-let a = validate
-          "<- s
-           ...
-           -> e
-           -> e
-           <- e, ee, es
-           -> s, se"
-
-let a = validate
-          "<- s
-           -> s, ss
-           ...
-           -> e
-           <- e, ee
-           -> s, se"
+let _ = List.map validate
+          [ "<- s ... -> e    <- e, ee, es  -> s, se"
+          ; "         -> e    <- e, ee, s   -> s, es, se"
+          ; "         -> e, e"
+          ; "         -> s, s"
+          ; "         -> e    <- e, e"
+          ; "         -> e    <- s, s"
+          ; "         -> e    <- e, ee, es  -> s, se"
+          ; "         -> e    <- e, ee, ee  -> s, se"
+          ; "         -> e    <- e          -> ee"
+          ; "         -> e    -> e, ee"
+          ; "<- e ... -> e, ee"
+          ; "<- s -> s, ss ... -> e, es"
+          ; ""
+          ; "<- s ... -> e <- e, ee, es -> s"
+          ]
