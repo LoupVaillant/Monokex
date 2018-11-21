@@ -59,17 +59,17 @@ let can_exchange : exchange -> state -> bool = fun ex st ->
 let send : key -> state -> state = fun key st ->
   check_can_send_key st;
   match key with
-  | S -> error_if st.shared.client_s "Client static key is sent twice.";
+  | S -> error_if st.shared.client_s "Initiator static key is sent twice.";
          add_client_s st
-  | E -> error_if st.shared.client_e "Client ephemeral key is sent twice.";
+  | E -> error_if st.shared.client_e "Initiator ephemeral key is sent twice.";
          add_client_e st
 
 let reply : key -> state -> state = fun key st ->
   check_can_send_key st;
   match key with
-  | S -> error_if st.shared.server_s "Server static key is sent twice.";
+  | S -> error_if st.shared.server_s "Respondent static key is sent twice.";
          add_server_s st
-  | E -> error_if st.shared.server_e "Server ephemeral key is sent twice.";
+  | E -> error_if st.shared.server_e "Respondent ephemeral key is sent twice.";
          add_server_e st
 
 let exchange : exchange -> state -> state = fun ex st ->
@@ -96,7 +96,7 @@ let check_alternation : message list -> unit =
   let alternation msg1 msg2 = match (msg1, msg2) with
     | Client _, Server m -> Server m
     | Server _, Client m -> Client m
-    | _                  -> error ("Messages must alternate directions," ^
+    | _                  -> error ("Messages must alternate directions, " ^
                                      "initiator first")
   in fun messages ->
      ignore (List.fold_left alternation (Server []) messages)
@@ -110,7 +110,7 @@ let run_protocol : protocol -> unit = fun (pre, run) ->
              ; last_action = Exchange (E, E) } in (* dummy value *)
   let st = messages pre init                   in
   error_if (st.shared.client_e ||
-              st.shared.server_e)      "Pre-shared ephemeral keys";
+              st.shared.server_e)      "Pre-shared ephemeral key";
   error_if (st.exchanges <> [])        "Key exchange performed in advance.";
   error_if (run = [])                  "Protocol has no message!";
   check_alternation run;
