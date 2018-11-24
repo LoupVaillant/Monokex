@@ -22,11 +22,11 @@ let a_client_e st = u_shared {st.shared with client_e = true} st
 let a_server_s st = u_shared {st.shared with server_s = true} st
 let a_server_e st = u_shared {st.shared with server_e = true} st
 
-let add_exchange ex st = a_exchange ex @@ u_last_action (Exchange ex) @@ st
-let add_client_s    st = a_client_s    @@ u_last_action (Key S      ) @@ st
-let add_client_e    st = a_client_e    @@ u_last_action (Key E      ) @@ st
-let add_server_s    st = a_server_s    @@ u_last_action (Key S      ) @@ st
-let add_server_e    st = a_server_e    @@ u_last_action (Key E      ) @@ st
+let add_exchange ex st = st |> a_exchange ex |> u_last_action (Exchange ex)
+let add_client_s    st = st |> a_client_s    |> u_last_action (Key S      )
+let add_client_e    st = st |> a_client_e    |> u_last_action (Key E      )
+let add_server_s    st = st |> a_server_s    |> u_last_action (Key S      )
+let add_server_e    st = st |> a_server_e    |> u_last_action (Key E      )
 
 let action_is_key = function
   | Exchange _ -> false
