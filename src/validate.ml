@@ -117,6 +117,16 @@ let run_protocol : protocol -> unit = fun (pre, run) ->
   let final = messages run st                in
   error_if (last_action_was_key final) "Protocol doesn't end by a key exchange."
 
+(* TODO: verify that every key is eventually used. Note that it would
+   mask the "must end by a key exchange" error.
+   TODO: decide what to do with respect to ephemeral keys:
+   - Must the initiator always send an ephemeral?
+   - Must the respondent include an ephemeral in its replies?
+   - More generally, does sending messages means we have to produce
+     an ephemeral?
+   - While we're at it, must the ephemeral be sent before anything else?
+ *)
+
 type t = Valid
        | Broken of string
 
