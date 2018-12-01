@@ -4,6 +4,28 @@ let (//) l p = List.filter p l
 let (/@) l f = List.map    f l
 let error s  = raise (Invalid_argument s)
 
+let rec mapi i f = function
+  | x::l -> f i x :: mapi (i+1) f l
+  | _    -> []
+let rec map2 f l1 l2 = match l1, l2 with
+  | x::l1, y::l2 -> f x y :: map2 f l1 l2
+  | _            -> []
+let rec map3 f l1 l2 l3 = match l1, l2, l3 with
+  | x::l1, y::l2, z::l3 -> f x y z :: map3 f l1 l2 l3
+  | _                   -> []
+let rec sums acc = function
+  | []      -> []
+  | x :: xs -> let sum = acc + x in
+               sum :: sums sum xs
+let rec remove_last = function
+  | []    -> error "remove_last"
+  | [_]   -> []
+  | x::xs -> x :: remove_last xs
+
+let pad_right strings =
+  let width = List.fold_left (fun w s -> max w (String.length s)) 0 strings in
+  strings /@ (fun s -> s ^ String.make (width - String.length s) ' ')
+
 type key      = IS | IE | RS | RE
 type exchange = key * key
 type action   = K of key
@@ -32,6 +54,12 @@ let to_exchange     = function E e -> e    | K _ -> error "to_exchange"
 let all_keys      p = flat_all p // is_key      /@ to_key
 let all_exchanges p = flat_all p // is_exchange /@ to_exchange
 
+let string_of_key = function
+  | IS -> "IS"
+  | IE -> "IE"
+  | RS -> "RS"
+  | RE -> "RE"
+
 let string_of_exchange = function
   | (IS, RS) -> "ss"
   | (IS, RE) -> "se"
@@ -58,13 +86,6 @@ let secrets p =
       | _          -> error "secrets")
   |> String.concat ""
 
-let rec mapi i f = function
-  | x::l -> f i x :: mapi (i+1) f l
-  | _    -> []
-let rec map3 f l1 l2 l3 = match l1, l2, l3 with
-  | x::l1, y::l2, z::l3 -> f x y z :: map3 f l1 l2 l3
-  | _                   -> []
-
 let chaining_keys p =
   let exchanges = all_exchanges p                                         in
   let e         = exchanges |@ string_of_exchange                         in
@@ -74,26 +95,23 @@ let chaining_keys p =
     ck ck0 e
   |> String.concat ""
 
-let rec sums acc = function
-  | []      -> []
-  | x :: xs -> let sum = acc + x in
-               sum :: sums sum xs
-
-let auth_keys p =
-  p
-  |> protocol
+let auth_numbers p =
+  protocol p
   |> snd
   |> List.map (fun m -> m // is_exchange |> List.length)
   |> List.filter ((<>) 0)
   |> sums 0
+
+let auth_keys p =
+  auth_numbers p
   |> List.map (fun i -> let s = string_of_int i in
                         "- __AK" ^ s ^ ":__ Blake2b-512(CK" ^ s ^ ")[0:31]\n")
   |> String.concat ""
 
 let encryption_keys p =
-  let actions   = flat_post p                                        in
-  let shifted   = List.tl actions @ [K IS]                           in
-  let zip       = List.map2 (fun a b -> (a, b)) actions shifted      in
+  let actions   = flat_post p                              in
+  let shifted   = List.tl actions @ [K IS]                 in
+  let zip       = map2 (fun a b -> (a, b)) actions shifted in
   zip // (function E _, _ -> true | _ -> false)
   |> mapi 1 (fun i -> function
          | E _, E _ -> ""
@@ -101,6 +119,62 @@ let encryption_keys p =
                        "- __EK"^ s ^":__ Blake2b-512(CK"^ s ^")[32:63]\n"
          | _        -> error "encryption_key")
   |> String.concat ""
+
+let payload_keys p =
+  auth_numbers p
+  |> remove_last
+  |> List.map (fun i -> let s = string_of_int i in
+                        "- __PK" ^ s ^ ":__ Blake2b-256(CK" ^ s ^ ")\n")
+  |> String.concat ""
+
+let encrypted_keys p =
+  let actions   = flat_post p                                    in
+  let shifted   = List.tl actions                                in
+  let zip       = map2 (fun a b -> (a, b)) actions shifted       in
+  let keys      = zip // (function E _, _ -> true | _ -> false)
+                  |> mapi 1 (fun i -> function
+                         | E _, E _ -> ""
+                         | E _, K k -> let s = string_of_int i in
+                                       let x = string_of_key k in
+                                       "    X" ^ x ^ "  = "
+                                       ^ x ^ " XOR EK" ^ s ^ "\n"
+                         | _        -> error "encryption_key")   in
+  if keys = []
+  then ""
+  else String.concat "" keys ^ "\n"
+
+let messages p =
+  let rec key ex = function
+    | []             -> []
+    | E e :: keys -> key (ex + 1) keys
+    | K k :: keys -> let x = if ex > 0 then "X" else "" in
+                        (x ^ string_of_key k) :: key ex keys in
+  let rec msg ex = function
+    | []            -> []
+    | m :: messages -> let nex = ex + (m // is_exchange |> List.length) in
+                       (String.concat " || " (key ex m)) :: msg nex messages in
+  let rec auth ex tr = function
+    | []            -> []
+    | m :: messages ->
+       let nex = ex + (m // is_exchange |> List.length)        in
+       (* let ntr = tr @ (m // is_key /@ to_key /@ string_of_key) in *)
+       let ntr = tr @ key ex m in
+       (if nex = 0 || ntr = []
+        then ""
+        else " || Poly1305(AK"
+             ^ string_of_int nex ^ ", "
+             ^ String.concat " || " ntr ^ ")"
+       ) :: auth nex ntr messages in
+  let tr = (flat_pre p // is_key /@ to_key /@ string_of_key) in
+  let m  = protocol p |> snd
+           |> msg 0
+           |> mapi 1 (fun i m -> "msg" ^ string_of_int i ^ " = " ^ m)
+           |> pad_right in
+  let a  = protocol p |> snd
+           |> (auth 0 tr) in
+  map2 (fun m a -> "    " ^ (if a = "" then String.trim m else m^a) ^ "\n") m a
+  |> String.concat ""
+
 
 let pe = print_endline
 let ps = print_string
@@ -117,15 +191,18 @@ let print_protocol p =
   pe "";
   pe "Those shared secrets are hashed to derive the following keys:";
   pe "";
-  ps (chaining_keys p);
-  ps (auth_keys p);
+  ps (chaining_keys   p);
+  ps (auth_keys       p);
   ps (encryption_keys p);
+  ps (payload_keys    p);
   pe "";
   pe "_(\"[x:y]\" denotes a range; Blake2b-256 is used in keyed mode, with the";
   pe "key on the left.)_";
   pe "";
-  pe "The message contain the following (`||` denotes concatenation):";
+  pe "The messages contain the following (`||` denotes concatenation):";
   pe "";
+  ps (encrypted_keys p);
+  ps (messages p);
   ()
 
 let proto str =
