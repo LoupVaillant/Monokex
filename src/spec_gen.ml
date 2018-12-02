@@ -148,7 +148,7 @@ let messages p =
     | []             -> []
     | E e :: keys -> key (ex + 1) keys
     | K k :: keys -> let x = if ex > 0 then "X" else "" in
-                        (x ^ string_of_key k) :: key ex keys in
+                        (x ^ string_of_key k) :: key ex keys                 in
   let rec msg ex = function
     | []            -> []
     | m :: messages -> let nex = ex + (m // is_exchange |> List.length) in
@@ -156,25 +156,65 @@ let messages p =
   let rec auth ex tr = function
     | []            -> []
     | m :: messages ->
-       let nex = ex + (m // is_exchange |> List.length)        in
-       (* let ntr = tr @ (m // is_key /@ to_key /@ string_of_key) in *)
-       let ntr = tr @ key ex m in
+       let nex = ex + (m // is_exchange |> List.length) in
+       let ntr = tr @ key ex m                          in
        (if nex = 0 || ntr = []
         then ""
         else " || Poly1305(AK"
              ^ string_of_int nex ^ ", "
              ^ String.concat " || " ntr ^ ")"
-       ) :: auth nex ntr messages in
-  let tr = (flat_pre p // is_key /@ to_key /@ string_of_key) in
+       ) :: auth nex ntr messages                                            in
   let m  = protocol p |> snd
            |> msg 0
            |> mapi 1 (fun i m -> "msg" ^ string_of_int i ^ " = " ^ m)
-           |> pad_right in
+           |> pad_right                                                      in
   let a  = protocol p |> snd
-           |> (auth 0 tr) in
+           |> (auth 0 (flat_pre p // is_key /@ to_key /@ string_of_key))     in
   map2 (fun m a -> "    " ^ (if a = "" then String.trim m else m^a) ^ "\n") m a
   |> String.concat ""
 
+let pre_shared p =
+  match (flat_pre p // is_key /@ to_key /@ string_of_key) with
+  | []       -> ""
+  | [k1]     -> "Note that " ^ k1 ^                " is shared in advance.\n"
+  | [k1; k2] -> "Note that " ^ k1 ^ " and " ^ k2 ^ "are shared in advance.\n"
+  | _        -> error "pre_shared"
+
+let handshake p =
+  let send sender receiver msg_num =
+    "- The "          ^ sender
+    ^ " sends msg"    ^ string_of_int msg_num
+    ^ " to the "      ^ receiver
+    ^ ".\n" in
+  let receive ex receiver msg_num =
+    if ex
+    then "- The "          ^ receiver
+         ^ " verifies msg" ^ string_of_int msg_num
+         ^ ", and aborts if it fails.\n"
+    else "- The "          ^ receiver
+         ^ " receives msg" ^ string_of_int msg_num
+         ^ ".\n" in
+  let transmit sender receiver =
+    "- The "          ^ receiver
+    ^ " checks the "  ^ sender
+    ^ "'s static key, and aborts if it fails.\n" in
+  let rec messages sender receiver msg_num ex = function
+    | []      -> ""
+    | m :: ms -> let nex = ex || (m // is_exchange |> (<>) []) in
+                 send sender receiver msg_num
+                 ^ receive nex receiver msg_num
+                 ^ messages receiver sender (msg_num + 1) nex ms
+                 ^ if List.exists (fun e -> e = K IS || e = K RS) m
+                   then transmit sender receiver
+                   else "" in
+  (protocol p
+   |> snd
+   |> messages "initiator" "respondent" 1 false)
+  ^ "- The protocol is complete.  The session key is EK"
+  ^ (all_exchanges p
+     |> List.length
+     |> string_of_int)
+  ^ ".\n"
 
 let pe = print_endline
 let ps = print_string
@@ -203,6 +243,11 @@ let print_protocol p =
   pe "";
   ps (encrypted_keys p);
   ps (messages p);
+  pe "";
+  ps (pre_shared p);
+  pe "The handshake proceeds as follows:";
+  pe "";
+  ps (handshake p);
   ()
 
 let proto str =
