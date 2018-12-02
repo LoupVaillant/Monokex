@@ -71,7 +71,7 @@ let keys p =
   let actions  = all_keys p                             in
   let kk k txt = if List.mem k actions then txt else "" in
   ""
-  ^ kk IS "- __(si, Is)__ The initiator's static key.\n"
+  ^ kk IS "- __(is, IS)__ The initiator's static key.\n"
   ^ kk IE "- __(ie, IE)__ The initiator's ephemeral key.\n"
   ^ kk RS "- __(rs, RS)__ The recipient's static key.\n"
   ^ kk RE "- __(re, RE)__ The recipient's ephemeral key.\n"
@@ -185,7 +185,7 @@ let handshake p =
     "- The "          ^ sender
     ^ " sends msg"    ^ string_of_int msg_num
     ^ " to the "      ^ receiver
-    ^ ".\n" in
+    ^ ".\n"                                      in
   let receive ex receiver msg_num =
     if ex
     then "- The "          ^ receiver
@@ -193,7 +193,7 @@ let handshake p =
          ^ ", and aborts if it fails.\n"
     else "- The "          ^ receiver
          ^ " receives msg" ^ string_of_int msg_num
-         ^ ".\n" in
+         ^ ".\n"                                 in
   let transmit sender receiver =
     "- The "          ^ receiver
     ^ " checks the "  ^ sender
