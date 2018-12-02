@@ -4,6 +4,7 @@
 
   type token = Key        of key
              | Exchange   of exchange
+             | Name       of string
              | Scan_error of char
              | Dots | Comma | Left | Right | Eof
 
@@ -30,6 +31,7 @@ rule next_token =
   | "<-"    {(p lexbuf, Left           )}
   | "->"    {(p lexbuf, Right          )}
   | "..."   {(p lexbuf, Dots           )}
+  | id as i {(p lexbuf, Name i         )}
   | eof     {(p lexbuf, Eof            )}
   | _ as c  {(p lexbuf, Scan_error c   )}
 

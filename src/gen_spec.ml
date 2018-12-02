@@ -1,5 +1,4 @@
-module P = Proto
-
+(* Utils *)
 let (//) l p = List.filter p l
 let (/@) l f = List.map    f l
 let error s  = raise (Invalid_argument s)
@@ -21,25 +20,25 @@ let rec remove_last = function
   | []    -> error "remove_last"
   | [_]   -> []
   | x::xs -> x :: remove_last xs
-
 let pad_right strings =
   let width = List.fold_left (fun w s -> max w (String.length s)) 0 strings in
   strings /@ (fun s -> s ^ String.make (width - String.length s) ' ')
 
+(* Convert protocol to a less implicit type *)
 type key      = IS | IE | RS | RE
 type exchange = key * key
 type action   = K of key
               | E of exchange
 
-let client_key = function S -> IS | E -> IE
-let server_key = function S -> RS | E -> RE
+let client_key = function Proto.S -> IS | Proto.E -> IE
+let server_key = function Proto.S -> RS | Proto.E -> RE
 let exchange (ik, rk) = (client_key ik, server_key rk)
 let action key = function
-  | Key k      -> K (key      k)
-  | Exchange e -> E (exchange e)
+  | Proto.Key k      -> K (key      k)
+  | Proto.Exchange e -> E (exchange e)
 let message = function
-  | Client m -> List.map (action client_key) m
-  | Server m -> List.map (action server_key) m
+  | Proto.Client m -> List.map (action client_key) m
+  | Proto.Server m -> List.map (action server_key) m
 let protocol (pre, post) =
   (List.map message pre,
    List.map message post)
@@ -54,20 +53,21 @@ let to_exchange     = function E e -> e    | K _ -> error "to_exchange"
 let all_keys      p = flat_all p // is_key      /@ to_key
 let all_exchanges p = flat_all p // is_exchange /@ to_exchange
 
-let string_of_key = function
+(* Convert protocol to specs *)
+let string_of_key : key -> string = function
   | IS -> "IS"
   | IE -> "IE"
   | RS -> "RS"
   | RE -> "RE"
 
-let string_of_exchange = function
+let string_of_exchange : exchange -> string = function
   | (IS, RS) -> "ss"
   | (IS, RE) -> "se"
   | (IE, RS) -> "es"
   | (IE, RE) -> "ee"
   | _        -> error "string_of_exchange"
 
-let keys p =
+let keys : Proto.protocol -> string = fun p ->
   let actions  = all_keys p                             in
   let kk k txt = if List.mem k actions then txt else "" in
   ""
@@ -78,7 +78,7 @@ let keys p =
 
 let secrets p =
   all_exchanges p
-  |@ (function
+  /@ (function
       | (IS, RS) -> "- __ss__ = X25519(is, RS) = X25519(rs, IS)\n"
       | (IS, RE) -> "- __se__ = X25519(is, RE) = X25519(re, IS)\n"
       | (IE, RS) -> "- __es__ = X25519(ie, RS) = X25519(rs, IE)\n"
@@ -86,29 +86,29 @@ let secrets p =
       | _          -> error "secrets")
   |> String.concat ""
 
-let chaining_keys p =
+let chaining_keys : Proto.protocol -> string = fun p ->
   let exchanges = all_exchanges p                                         in
-  let e         = exchanges |@ string_of_exchange                         in
+  let e         = exchanges /@ string_of_exchange                         in
   let ck        = exchanges |> mapi 1 (fun i _ -> "CK" ^ string_of_int i) in
   let ck0       = "zero" :: List.map (fun c -> c ^ " ") ck                in
   map3 (fun ck ck0 e -> "- __" ^ ck ^ ":__ Blake2b-256("^ ck0 ^", "^ e^")\n")
     ck ck0 e
   |> String.concat ""
 
-let auth_numbers p =
+let auth_numbers : Proto.protocol -> int list = fun p ->
   protocol p
   |> snd
   |> List.map (fun m -> m // is_exchange |> List.length)
   |> List.filter ((<>) 0)
   |> sums 0
 
-let auth_keys p =
+let auth_keys : Proto.protocol -> string = fun p ->
   auth_numbers p
   |> List.map (fun i -> let s = string_of_int i in
                         "- __AK" ^ s ^ ":__ Blake2b-512(CK" ^ s ^ ")[0:31]\n")
   |> String.concat ""
 
-let encryption_keys p =
+let encryption_keys : Proto.protocol -> string = fun p ->
   let actions   = flat_post p                              in
   let shifted   = List.tl actions @ [K IS]                 in
   let zip       = map2 (fun a b -> (a, b)) actions shifted in
@@ -120,14 +120,14 @@ let encryption_keys p =
          | _        -> error "encryption_key")
   |> String.concat ""
 
-let payload_keys p =
+let payload_keys : Proto.protocol -> string = fun p ->
   auth_numbers p
   |> remove_last
   |> List.map (fun i -> let s = string_of_int i in
                         "- __PK" ^ s ^ ":__ Blake2b-256(CK" ^ s ^ ")\n")
   |> String.concat ""
 
-let encrypted_keys p =
+let encrypted_keys : Proto.protocol -> string = fun p ->
   let actions   = flat_post p                                    in
   let shifted   = List.tl actions                                in
   let zip       = map2 (fun a b -> (a, b)) actions shifted       in
@@ -143,7 +143,7 @@ let encrypted_keys p =
   then ""
   else String.concat "" keys ^ "\n"
 
-let messages p =
+let messages : Proto.protocol -> string = fun p ->
   let rec key ex = function
     | []             -> []
     | E e :: keys -> key (ex + 1) keys
@@ -173,14 +173,14 @@ let messages p =
   map2 (fun m a -> "    " ^ (if a = "" then String.trim m else m^a) ^ "\n") m a
   |> String.concat ""
 
-let pre_shared p =
+let pre_shared : Proto.protocol -> string = fun p ->
   match (flat_pre p // is_key /@ to_key /@ string_of_key) with
   | []       -> ""
   | [k1]     -> "Note that " ^ k1 ^                " is shared in advance.\n"
   | [k1; k2] -> "Note that " ^ k1 ^ " and " ^ k2 ^ "are shared in advance.\n"
   | _        -> error "pre_shared"
 
-let handshake p =
+let handshake : Proto.protocol -> string = fun p ->
   let send sender receiver msg_num =
     "- The "          ^ sender
     ^ " sends msg"    ^ string_of_int msg_num
@@ -216,10 +216,9 @@ let handshake p =
      |> string_of_int)
   ^ ".\n"
 
-let pe = print_endline
-let ps = print_string
-
-let print_protocol p =
+let print : out_channel -> Proto.protocol -> unit = fun channel p ->
+  let ps s = output_string channel s in
+  let pe s = ps s; ps "\n"           in
   pe "Sender and recipient have the following X25519 key pairs (private half";
   pe "in lower case, public half in upper case):";
   pe "";
@@ -249,11 +248,3 @@ let print_protocol p =
   pe "";
   ps (handshake p);
   ()
-
-let proto str =
-  str
-  |> Lexing.from_string
-  |> Scan.tokens
-  |> Parsec.parse
-
-let _ = print_protocol (proto "<- s ... -> e    <- e, ee, es  -> s, se")

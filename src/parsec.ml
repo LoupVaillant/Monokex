@@ -5,6 +5,8 @@ open Scan
 let const x y   = x
 let swap  f x y = f y x
 let cons  x l   = x :: l
+let pair  a b   = a, b
+let error e     = raise (Invalid_argument e)
 
 type 'a psr = (int * token) Stream.t -> 'a
 
@@ -60,20 +62,24 @@ let token : token -> unit psr = fun t -> () <$ token_if ((=) t)
 (* Grammar *)
 let is_key      = function Scan.Key      _ -> true | _ -> false
 let is_exchange = function Scan.Exchange _ -> true | _ -> false
+let is_name     = function Scan.Name     _ -> true | _ -> false
+let to_name     = function Scan.Name n -> n | _-> error "to_name"
 let to_action   = function Scan.Key      k -> Proto.Key      k
                          | Scan.Exchange e -> Proto.Exchange e
-                         | _               -> raise(Invalid_argument"to_action")
+                         | _               -> error "to_action"
 
 let key            = to_action <$> token_if is_key
 let exchange       = to_action <$> token_if is_exchange
+let name           = to_name   <$> token_if is_name
 let action         = key <|> exchange
 let message        = sep_by action (token Comma) "comma separated actions"
 let client_message = (fun m -> Client m) <$> token Right *> message
 let server_message = (fun m -> Server m) <$> token Left  *> message
 let any_message    = client_message <|> server_message
-let parse          = (fun pre -> function
+let protocol       = (fun pre -> function
                        | []   -> ([] , pre )
                        | post -> (pre, post))
                      <$> many any_message
                      <*> (token Dots *> (many any_message)
                           <|> pure [])
+let protocols      = many (pair <$> name <*> protocol)
