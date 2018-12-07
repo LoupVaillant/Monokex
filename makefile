@@ -24,11 +24,11 @@ gen: gen.out
 	mkdir -p gen
 	./gen.out < protocols.txt > gen/spec.md
 
-gen.out: $(SRC) src/main.ml
+gen.out: src/main.ml $(SRC)
 	cp src/proto.ml src/proto.mli
 	ocamlc $(OFLAGS) $(MLI) -c
 	ocamlc $(OFLAGS) $(SRC) -c
-	ocamlc $(OFLAGS) $(CMO) -o $@
+	ocamlc $(OFLAGS) $(CMO) $< -o $@
 
 src/repl.out: $(CORE_SRC)
 	cp src/proto.ml src/proto.mli
