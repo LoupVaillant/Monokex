@@ -205,10 +205,10 @@ let handshake : Proto.protocol -> string = fun p ->
     | m :: ms -> let nex = ex || (m // is_exchange |> (<>) []) in
                  send sender receiver msg_num
                  ^ receive nex receiver msg_num
-                 ^ messages receiver sender (msg_num + 1) nex ms
-                 ^ if List.exists (fun e -> e = K IS || e = K RS) m
-                   then transmit sender receiver
-                   else "" in
+                 ^ (if List.exists (fun e -> e = K IS || e = K RS) m
+                    then transmit sender receiver
+                    else "")
+                 ^ messages receiver sender (msg_num + 1) nex ms in
   (protocol p
    |> snd
    |> messages "initiator" "respondent" 1 false)
