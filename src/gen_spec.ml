@@ -245,8 +245,8 @@ let print : out_channel -> Proto.protocol -> unit = fun channel p ->
   ps (encryption_keys p);
   ps (payload_keys    p);
   pe "";
-  pe "_(\"[x:y]\" denotes a range; Blake2b-256 is used in keyed mode, with the";
-  pe "key on the left.)_";
+  pe "_(\"[x:y]\" denotes a range; when Blake2b is used in keyed mode, the key";
+  pe "is on the left.)_";
   pe "";
   pe "The messages contain the following (`||` denotes concatenation):";
   pe "";
