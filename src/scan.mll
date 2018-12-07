@@ -1,12 +1,11 @@
 {
   open Lexing
-  open Proto
 
-  type token = Key        of key
-             | Exchange   of exchange
+  type token = Key        of Proto.key
+             | Exchange   of Proto.exchange
              | Name       of string
              | Scan_error of char
-             | Dots | Comma | Left | Right | Eof
+             | Column | Dots | Comma | Left | Right | Eof
 
   let p lexbuf = lexbuf.lex_curr_p.pos_lnum
 }
@@ -21,19 +20,20 @@ rule next_token =
   parse
   | white   {                  next_token lexbuf } (* Skip whitespace *)
   | newline { new_line lexbuf; next_token lexbuf } (* Count lines     *)
-  | "ee"    {(p lexbuf, Exchange (E, E))}
-  | "es"    {(p lexbuf, Exchange (E, S))}
-  | "se"    {(p lexbuf, Exchange (S, E))}
-  | "ss"    {(p lexbuf, Exchange (S, S))}
-  | "s"     {(p lexbuf, Key S          )}
-  | "e"     {(p lexbuf, Key E          )}
-  | ','     {(p lexbuf, Comma          )}
-  | "<-"    {(p lexbuf, Left           )}
-  | "->"    {(p lexbuf, Right          )}
-  | "..."   {(p lexbuf, Dots           )}
-  | id as i {(p lexbuf, Name i         )}
-  | eof     {(p lexbuf, Eof            )}
-  | _ as c  {(p lexbuf, Scan_error c   )}
+  | "ee"    {(p lexbuf, Exchange (Proto.E, Proto.E))}
+  | "es"    {(p lexbuf, Exchange (Proto.E, Proto.S))}
+  | "se"    {(p lexbuf, Exchange (Proto.S, Proto.E))}
+  | "ss"    {(p lexbuf, Exchange (Proto.S, Proto.S))}
+  | "s"     {(p lexbuf, Key Proto.S                )}
+  | "e"     {(p lexbuf, Key Proto.E                )}
+  | ':'     {(p lexbuf, Column                     )}
+  | "..."   {(p lexbuf, Dots                       )}
+  | ','     {(p lexbuf, Comma                      )}
+  | "<-"    {(p lexbuf, Left                       )}
+  | "->"    {(p lexbuf, Right                      )}
+  | id as i {(p lexbuf, Name i                     )}
+  | eof     {(p lexbuf, Eof                        )}
+  | _ as c  {(p lexbuf, Scan_error c               )}
 
 {
   let tokens lexbuf =

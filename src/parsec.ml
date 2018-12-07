@@ -82,4 +82,4 @@ let protocol       = (fun pre -> function
                      <$> many any_message
                      <*> (token Dots *> (many any_message)
                           <|> pure [])
-let protocols      = many (pair <$> name <*> protocol)
+let protocols      = many (pair <$> (name <* token Column) <*> protocol)
