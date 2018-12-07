@@ -188,6 +188,10 @@ let handshake : Proto.protocol -> string = fun p ->
     ^ " sends msg"    ^ string_of_int msg_num
     ^ " to the "      ^ receiver
     ^ ".\n"                                      in
+  let payload sender receiver payload_num =
+    "- The "        ^ sender
+    ^ " may use PK" ^ string_of_int payload_num
+    ^ " to send an encrypted payload.\n"         in
   let receive ex receiver msg_num =
     if ex
     then "- The "          ^ receiver
@@ -202,16 +206,20 @@ let handshake : Proto.protocol -> string = fun p ->
     ^ "'s static key, and aborts if it fails.\n" in
   let rec messages sender receiver msg_num ex = function
     | []      -> ""
-    | m :: ms -> let nex = ex || (m // is_exchange |> (<>) []) in
+    | m :: ms -> let nex    = ex + (m // is_exchange |> List.length) in
+                 let did_ex = nex > 0                                in
                  send sender receiver msg_num
-                 ^ receive nex receiver msg_num
+                 ^ (if did_ex && ms <> []
+                    then payload sender receiver nex
+                    else "")
+                 ^ receive did_ex receiver msg_num
                  ^ (if List.exists (fun e -> e = K IS || e = K RS) m
                     then transmit sender receiver
                     else "")
                  ^ messages receiver sender (msg_num + 1) nex ms in
   (protocol p
    |> snd
-   |> messages "initiator" "respondent" 1 false)
+   |> messages "initiator" "respondent" 1 0)
   ^ "- The protocol is complete.  The session key is EK"
   ^ (all_exchanges p
      |> List.length
