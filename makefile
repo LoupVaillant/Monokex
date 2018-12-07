@@ -20,7 +20,7 @@ clean:
 	rm -f gen.out src/repl.out
 	rm -rf gen
 
-gen: gen.out
+gen: gen.out protocols.txt
 	mkdir -p gen
 	./gen.out < protocols.txt > gen/spec.md
 
