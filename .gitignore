@@ -1,4 +1,8 @@
-lib/*
+*.cmi
+*.cmo
 gen/*
 *.out
 *~
+
+src/proto.mli
+src/scan.ml
