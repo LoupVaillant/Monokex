@@ -86,7 +86,6 @@ let message : state -> message -> state = fun st message ->
   let act st = function
     | Key      k -> send_or_reply k st
     | Exchange e -> exchange      e st   in
-  error_if (not (List.exists action_is_key actions)) "Message sends no key.";
   List.fold_left act st actions
 
 let messages : message list -> state -> state = fun messages st ->

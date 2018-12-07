@@ -160,7 +160,9 @@ let messages : Proto.protocol -> string = fun p ->
        let ntr = tr @ key ex m                          in
        (if nex = 0 || ntr = []
         then ""
-        else " || Poly1305(AK"
+        else (if (m // is_key |> (=) [])
+              then "    Poly1305(AK"
+              else " || Poly1305(AK")
              ^ string_of_int nex ^ ", "
              ^ String.concat " || " ntr ^ ")"
        ) :: auth nex ntr messages                                            in
