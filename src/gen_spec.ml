@@ -257,4 +257,6 @@ let print : out_channel -> Proto.protocol -> unit = fun channel p ->
   pe "The handshake proceeds as follows:";
   pe "";
   ps (handshake p);
+  pe "";
+  pe "";
   ()
