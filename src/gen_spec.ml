@@ -91,7 +91,10 @@ let chaining_keys : Proto.protocol -> string = fun p ->
   let e         = exchanges /@ string_of_exchange                         in
   let ck        = exchanges |> mapi 1 (fun i _ -> "CK" ^ string_of_int i) in
   let ck0       = "zero" :: List.map (fun c -> c ^ " ") ck                in
-  map3 (fun ck ck0 e -> "- __" ^ ck ^ ":__ Blake2b-256("^ ck0 ^", "^ e^")\n")
+  map3 (fun ck ck0 e -> "- __"                     ^ ck
+                        ^ ":__ HChacha20("         ^ e
+                        ^ ", zero) XOR HChacha20(" ^ ck0
+                        ^ ", one)\n")
     ck ck0 e
   |> String.concat ""
 
@@ -105,7 +108,7 @@ let auth_numbers : Proto.protocol -> int list = fun p ->
 let auth_keys : Proto.protocol -> string = fun p ->
   auth_numbers p
   |> List.map (fun i -> let s = string_of_int i in
-                        "- __AK" ^ s ^ ":__ Blake2b-512(CK" ^ s ^ ")[0:31]\n")
+                        "- __AK"^ s ^":__ Chacha20(CK"^ s ^", one)[ 0:31]\n")
   |> String.concat ""
 
 let encryption_keys : Proto.protocol -> string = fun p ->
@@ -116,7 +119,7 @@ let encryption_keys : Proto.protocol -> string = fun p ->
   |> mapi 1 (fun i -> function
          | E _, E _ -> ""
          | E _, K _ -> let s = string_of_int i in
-                       "- __EK"^ s ^":__ Blake2b-512(CK"^ s ^")[32:63]\n"
+                       "- __EK" ^ s ^ ":__ Chacha20(CK" ^ s ^ ", one)[32:63]\n"
          | _        -> error "encryption_key")
   |> String.concat ""
 
@@ -124,7 +127,7 @@ let payload_keys : Proto.protocol -> string = fun p ->
   auth_numbers p
   |> remove_last
   |> List.map (fun i -> let s = string_of_int i in
-                        "- __PK" ^ s ^ ":__ Blake2b-256(CK" ^ s ^ ")\n")
+                        "- __PK"^ s ^":__ Chacha20(CK"^ s ^", two)[ 0:31]\n")
   |> String.concat ""
 
 let encrypted_keys : Proto.protocol -> string = fun p ->
@@ -245,8 +248,8 @@ let print : out_channel -> Proto.protocol -> unit = fun channel p ->
   ps (encryption_keys p);
   ps (payload_keys    p);
   pe "";
-  pe "_(\"[x:y]\" denotes a range; when Blake2b is used in keyed mode, the key";
-  pe "is on the left.)_";
+  pe "_(\"[x:y]\" denotes a range; zero, one, and two are encoded in little";
+  pe "endian format)_";
   pe "";
   pe "The messages contain the following (`||` denotes concatenation):";
   pe "";
