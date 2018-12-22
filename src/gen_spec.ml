@@ -73,8 +73,8 @@ let keys : Proto.protocol -> string = fun p ->
   ""
   ^ kk IS "- __(is, IS)__ The initiator's static key.\n"
   ^ kk IE "- __(ie, IE)__ The initiator's ephemeral key.\n"
-  ^ kk RS "- __(rs, RS)__ The recipient's static key.\n"
-  ^ kk RE "- __(re, RE)__ The recipient's ephemeral key.\n"
+  ^ kk RS "- __(rs, RS)__ The respondent's static key.\n"
+  ^ kk RE "- __(re, RE)__ The respondent's ephemeral key.\n"
 
 let secrets p =
   all_exchanges p
