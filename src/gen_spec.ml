@@ -181,8 +181,8 @@ let messages : Proto.protocol -> string = fun p ->
 let pre_shared : Proto.protocol -> string = fun p ->
   match (flat_pre p // is_key /@ to_key /@ string_of_key) with
   | []       -> ""
-  | [k1]     -> "Note that " ^ k1 ^                " is shared in advance.\n"
-  | [k1; k2] -> "Note that " ^ k1 ^ " and " ^ k2 ^ "are shared in advance.\n"
+  | [k1]     -> "Note that " ^ k1 ^                 " is shared in advance.\n"
+  | [k1; k2] -> "Note that " ^ k1 ^ " and " ^ k2 ^ " are shared in advance.\n"
   | _        -> error "pre_shared"
 
 let handshake : Proto.protocol -> string = fun p ->
