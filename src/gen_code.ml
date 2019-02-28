@@ -158,13 +158,13 @@ let message_proto pattern nb messages =
   fn ^ "monokex_ctx  *ctx"
   ^ (if session_key then sk   else "")
   ^ (if remote      then rk   else "")
-  ^ (if receives nb then
-       let rs = string_of_int (r_size nb messages) in
-       arg ("const uint8_t msg" ^ previous ^ "[" ^ rs ^ "]")
-     else "")
   ^ (if sends nb messages then
        let ss = string_of_int (s_size nb messages) in
        arg ("uint8_t       msg" ^ current  ^ "[" ^ ss ^ "]")
+     else "")
+  ^ (if receives nb then
+       let rs = string_of_int (r_size nb messages) in
+       arg ("const uint8_t msg" ^ previous ^ "[" ^ rs ^ "]")
      else "")
   ^ ")"
 
@@ -174,17 +174,26 @@ let str_msg nb  = "msg" ^ string_of_int nb
 let key_comment key nb =
   (if nb mod 2 = 0 then "<- R" else "-> I") ^ map_es "E" "S" key
 
-let receive_key message_number key =
+let message_offset       nb_keys = string_of_int (nb_keys * 32)
+let message_offset_space nb_keys =
+  if nb_keys = 0
+  then "     "
+  else " + " ^ message_offset nb_keys
+
+let receive_key message_number nb_keys key =
   let ctx_key = map_es "ctx->remote_pke" "ctx->remote_pk " key    in
-  "    kex_receive   (ctx->" ^ ctx_key
+  "    kex_receive   (ctx, " ^ ctx_key
   ^ ", "                     ^ str_msg message_number
-  ^ "           );  // "     ^ key_comment key message_number
+  ^                            message_offset_space nb_keys
+  ^ "      );  // "          ^ key_comment key message_number
+  ^ key_comment key message_number
   ^ "\n"
 
-let send_key message_number key =
+let send_key message_number nb_keys key =
   let ctx_key = map_es "ctx->local_pke" "ctx->local_pk " key        in
   "    kex_send      (ctx, " ^ str_msg message_number
-  ^ "           , "          ^ ctx_key
+  ^                            message_offset_space nb_keys
+  ^ "      , "               ^ ctx_key
   ^ " );  // "               ^ key_comment key message_number
   ^ "\n"
 
@@ -220,9 +229,20 @@ let verify message_number nb_keys =
           ^ ")) { return -1; }          // verify\n"
     )
 
+(* counts elements of a list, one by one. *)
+let rec counts p start = function
+  | []      -> []
+  | x :: xs -> let new_start = (if p x then 1 else 0) + start in
+               new_start :: counts p new_start xs
+let key_counts = counts is_key (-1)
+
 let process_message process_key cs message_number message =
-  message
-  /@ map_ke (process_key message_number) (exchange cs)
+  List.map2
+    (fun ke count ->
+      map_ke (process_key message_number count) (exchange cs) ke
+    )
+    message
+    (key_counts message)
   |> String.concat ""
 
 let receive_message = process_message receive_key
@@ -291,7 +311,7 @@ let print_header_prefix channel =
     ; "    uint8_t remote_pk   [32];"
     ; "    uint8_t remote_pke  [32];"
     ; "    size_t  transcript_size;"
-    ; "} crypto_kex_ctx;"
+    ; "} monokex_ctx;"
     ; ""
     ]
 
@@ -301,26 +321,24 @@ let print_source_prefix channel =
     ; "#include \"handshake.h\""
     ; ""
     ; "#define FOR(i, start, end)   "
-        ^ "for (size_t (i) = (start); (i) < (end); (i)++)"
+      ^ "for (size_t (i) = (start); (i) < (end); (i)++)"
     ; "#define WIPE_CTX(ctx)        crypto_wipe(ctx   , sizeof(*(ctx)))"
     ; "#define WIPE_BUFFER(buffer)  crypto_wipe(buffer, sizeof(buffer))"
     ; ""
-    ; "typedef uint8_t u8;"
+    ; "static const uint8_t zero[32] = {0};"
+    ; "static const uint8_t one [16] = {1};"
     ; ""
-    ; "static const u8 zero[32] = {0};"
-    ; "static const u8 one [16] = {1};"
+    ; "static void copy32(uint8_t out[32], const uint8_t in[32])"
+      ^ "{FOR (i, 0, 32){out[i] = in[i];}}"
+    ; "static void xor32 (uint8_t out[32], const uint8_t in[32])"
+      ^ "{FOR (i, 0, 32){out[i]^= in[i];}}"
     ; ""
-    ; "static void copy32(u8 out[32], const u8 in[32])"
-        ^ "{FOR (i, 0, 32){out[i] = in[i];}}"
-    ; "static void xor32 (u8 out[32], const u8 in[32])"
-        ^ "{FOR (i, 0, 32){out[i]^= in[i];}}"
-    ; ""
-    ; "static void kex_update_key(crypto_kex_ctx *ctx,"
-    ; "                           const u8        secret_key[32],"
-    ; "                           const u8        public_key[32])"
+    ; "static void kex_update_key(monokex_ctx  *ctx,"
+    ; "                           const uint8_t secret_key[32],"
+    ; "                           const uint8_t public_key[32])"
     ; "{"
     ; "    // Extract"
-    ; "    u8 shared_secret[32];"
+    ; "    uint8_t shared_secret[32];"
     ; "    crypto_x25519(shared_secret, secret_key, public_key);"
     ; "    crypto_chacha20_H(shared_secret    , shared_secret    , zero);"
     ; "    crypto_chacha20_H(ctx->chaining_key, ctx->chaining_key, one );"
@@ -336,15 +354,15 @@ let print_source_prefix channel =
     ; "    WIPE_CTX(&chacha_ctx);"
     ; "}"
     ; ""
-    ; "static void kex_auth(crypto_kex_ctx *ctx, u8 mac[16])"
+    ; "static void kex_auth(monokex_ctx *ctx, uint8_t mac[16])"
     ; "{"
     ; "    crypto_poly1305(mac, ctx->transcript, ctx->transcript_size,"
     ; "                    ctx->derived_keys);"
     ; "}"
     ; ""
-    ; "static int kex_verify(crypto_kex_ctx *ctx, const u8 mac[16])"
+    ; "static int kex_verify(monokex_ctx *ctx, const uint8_t mac[16])"
     ; "{"
-    ; "    u8 real_mac[16];"
+    ; "    uint8_t real_mac[16];"
     ; "    kex_auth(ctx, real_mac);"
     ; "    int mismatch = crypto_verify16(real_mac, mac);"
     ; "    if (mismatch) {  WIPE_CTX(ctx); }"
@@ -352,8 +370,8 @@ let print_source_prefix channel =
     ; "    return mismatch;"
     ; "}"
     ; ""
-    ; "static void kex_send(crypto_kex_ctx *ctx,"
-    ; "                     u8 msg[32], const u8 src[32])"
+    ; "static void kex_send(monokex_ctx *ctx,"
+    ; "                     uint8_t msg[32], const uint8_t src[32])"
     ; "{"
     ; "    // Send message, encrypted if we have a key"
     ; "    copy32(msg, src);"
@@ -363,8 +381,8 @@ let print_source_prefix channel =
     ; "    ctx->transcript_size += 32;"
     ; "}"
     ; ""
-    ; "static void kex_receive(crypto_kex_ctx *ctx,"
-    ; "                        u8 dest[32], const u8 msg[32])"
+    ; "static void kex_receive(monokex_ctx *ctx,"
+    ; "                        uint8_t dest[32], const uint8_t msg[32])"
     ; "{"
     ; "    // Record incoming message"
     ; "    copy32(ctx->transcript + ctx->transcript_size, msg);"
@@ -374,25 +392,25 @@ let print_source_prefix channel =
     ; "    xor32(dest, ctx->derived_keys + 32);"
     ; "}"
     ; ""
-    ; "static void kex_init(crypto_kex_ctx *ctx,"
-    ; "                     uint8_t         random_seed[32],"
-    ; "                     const uint8_t   local_sk   [32],"
-    ; "                     const uint8_t   local_pk   [32])"
+    ; "static void kex_seed(crypto_kex_ctx *ctx,"
+    ; "                     uint8_t         random_seed[32])"
     ; "{"
-    ; "    if (local_pk == 0)"
-        ^   " crypto_x25519_public_key(ctx->local_pk, local_sk);"
-    ; "    else"
-        ^   "               copy32                  (ctx->local_pk, local_pk);"
     ; "    copy32(ctx->chaining_key     , zero       );"
-    ; "    copy32(ctx->derived_keys + 32, zero       );"
-        ^ " // first encryption key is zero"
-    ; "    copy32(ctx->local_sk         , local_sk   );"
+    ; "    copy32(ctx->derived_keys + 32, zero       ); // first encryption key is zero"
     ; "    copy32(ctx->local_ske        , random_seed);"
     ; "    crypto_wipe(random_seed, 32); // auto wipe seed to avoid reuse"
     ; "    crypto_x25519_public_key(ctx->local_pke, ctx->local_ske);"
     ; "    ctx->transcript_size  = 0;"
     ; "}"
     ; ""
+    ; "static void kex_locals(crypto_kex_ctx *ctx,"
+    ; "                       const uint8_t   local_sk   [32],"
+    ; "                       const uint8_t   local_pk   [32])"
+    ; "{"
+    ; "    if (local_pk == 0) crypto_x25519_public_key(ctx->local_pk, local_sk);"
+    ; "    else               copy32                  (ctx->local_pk, local_pk);"
+    ; "    copy32(ctx->local_sk         , local_sk   );"
+    ; "}"
     ]
 
 let block_comment comment =

@@ -253,7 +253,7 @@ let print : out_channel -> string -> Proto.protocol -> unit =
   ps (payload_keys    p);
   pe "";
   pe "_(\"[x:y]\" denotes a range; zero, one, and two are encoded in little";
-  pe "endian format)_";
+  pe "endian format.)_";
   pe "";
   pe "The messages contain the following (`||` denotes concatenation):";
   pe "";
