@@ -5,6 +5,7 @@ SRC = src/proto.ml    \
       src/parsec.ml   \
       src/validate.ml \
       src/gen_spec.ml \
+      src/gen_code.ml \
 
 MLI = $(patsubst %.ml, %.mli, $(SRC))
 CMI = $(patsubst %.ml, %.cmi, $(SRC))
@@ -22,7 +23,7 @@ clean:
 
 gen: gen.out protocols.txt
 	mkdir -p gen
-	./gen.out < protocols.txt > gen/spec.md
+	./gen.out gen < protocols.txt
 
 gen.out: src/main.ml $(SRC)
 	cp src/proto.ml src/proto.mli
@@ -30,7 +31,7 @@ gen.out: src/main.ml $(SRC)
 	ocamlc $(OFLAGS) $(SRC) -c
 	ocamlc $(OFLAGS) $(CMO) $< -o $@
 
-src/repl.out: $(CORE_SRC)
+src/repl.out: $(SRC)
 	cp src/proto.ml src/proto.mli
 	ocamlc     $(OFLAGS) $(MLI) -c
 	ocamlc     $(OFLAGS) $(SRC) -c

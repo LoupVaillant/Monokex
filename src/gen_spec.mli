@@ -1,1 +1,1 @@
-val print : out_channel -> Proto.protocol -> unit
+val print : out_channel -> string -> Proto.protocol -> unit

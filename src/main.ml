@@ -1,3 +1,8 @@
+(* Utils *)
+let iter_pair f l =
+  let l1, l2 = List.split l in
+  List.iter2 f l1 l2
+
 open Proto
 
 let validate (name, p) =
@@ -13,14 +18,23 @@ let parse channel =
   |> Parsec.protocols
 
 let _ =
-  let input     = stdin       in
-  let output    = stdout      in
-  let protocols = parse input in
+  let folder    = Sys.argv.(1) in
+  let spec      = open_out (folder ^ "/spec.md"  ) in
+  let header    = open_out (folder ^ "/monokex.h") in
+  let source    = open_out (folder ^ "/monokex.c") in
+  let protocols = parse stdin                      in
+
   List.iter validate protocols;
-  List.iter (fun (name, p) ->
-      output_string  output (name                                 ^ "\n");
-      output_string  output (String.make (String.length name) '=' ^ "\n");
-      output_string  output "\n";
-      Gen_spec.print output p
-    ) protocols;
+
+  iter_pair (Gen_spec.print spec) protocols;
+
+  Gen_code.print_header_prefix header;
+  iter_pair (Gen_code.print_header_pattern header) protocols;
+
+  Gen_code.print_source_prefix source;
+  iter_pair (Gen_code.print_source_pattern source) protocols;
+
+  close_out source;
+  close_out header;
+  close_out spec;
   ()

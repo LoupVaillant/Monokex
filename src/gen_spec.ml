@@ -229,7 +229,11 @@ let handshake : Proto.protocol -> string = fun p ->
      |> string_of_int)
   ^ ".\n"
 
-let print : out_channel -> Proto.protocol -> unit = fun channel p ->
+let title t = t ^ "\n" ^ String.make (String.length t) '=' ^ "\n"
+
+let print : out_channel -> string -> Proto.protocol -> unit =
+  fun channel pattern p ->
+  output_string  channel (title pattern);
   let ps s = output_string channel s in
   let pe s = ps s; ps "\n"           in
   pe "Sender and recipient have the following X25519 key pairs (private half";
