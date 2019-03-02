@@ -84,23 +84,23 @@ let init_proto pattern cs protocol =
   let css   = match cs with Client -> "client" | Server -> "server" in
   let fn    = "void crypto_kex_" ^ pattern ^ "_init_" ^  css ^ "("  in
   let arg a = ",\n" ^ indent (String.length fn) a                   in
-  let seed  = arg "uint8_t       random_seed[32]"                   in
-  let sk    = arg "const uint8_t local_sk   [32]"                   in
-  let pk    = arg "const uint8_t local_pk   [32]"                   in
-  let r     = arg "const uint8_t remote_pk  [32]"                   in
-  fn ^ "crypto_kex_ctx  *ctx"
+  let seed  = arg "uint8_t         random_seed[32]"                 in
+  let sk    = arg "const uint8_t   local_sk   [32]"                 in
+  let pk    = arg "const uint8_t   local_pk   [32]"                 in
+  let r     = arg "const uint8_t   remote_pk  [32]"                 in
+  fn ^ "crypto_kex_ctx *ctx"
   ^ (if uses_ephemeral   cs protocol then seed    else "")
   ^ (if is_authenticated cs protocol then sk ^ pk else "")
   ^ (if List.mem Remote lr           then r       else "")
   ^ ")"
 
 let init_body cs protocol =
-  let lr     = lr_of_protocol   cs protocol                        in
-  let init   = "kex_init   (ctx);\n"                               in
-  let seed   = "kex_seed   (ctx, random_seed);\n"                  in
-  let sk_pk  = "kex_locals (ctx, local_sk, local_pk);\n"           in
-  let r      = "kex_receive(ctx, ctx->remote_pk, remote_pk);\n"    in
-  let l      = "kex_receive(ctx, ctx->local_pk, ctx->local_pk);\n" in
+  let lr     = lr_of_protocol   cs protocol                            in
+  let init   = "    kex_init   (ctx);\n"                               in
+  let seed   = "    kex_seed   (ctx, random_seed);\n"                  in
+  let sk_pk  = "    kex_locals (ctx, local_sk, local_pk);\n"           in
+  let r      = "    kex_receive(ctx, ctx->remote_pk, remote_pk);\n"    in
+  let l      = "    kex_receive(ctx, ctx->local_pk, ctx->local_pk);\n" in
   "\n{\n"
   ^ init
   ^ (if uses_ephemeral   cs protocol then seed  else "")
@@ -155,18 +155,18 @@ let message_proto pattern nb messages =
   let previous    = string_of_int (nb - 1)                                    in
   let fn          = return_type ^ " crypto_kex_" ^ pattern^"_"^current ^ "("  in
   let arg a       = ",\n" ^ indent (String.length fn) a                       in
-  let sk          = arg  "uint8_t       session_key[32]"                      in
-  let rk          = arg  "uint8_t       remote_pk[32]"                        in
-  fn ^ "crypto_kex_ctx  *ctx"
+  let sk          = arg  "uint8_t         session_key[32]"                    in
+  let rk          = arg  "uint8_t         remote_pk[32]"                      in
+  fn ^ "crypto_kex_ctx *ctx"
   ^ (if session_key then sk   else "")
   ^ (if remote      then rk   else "")
   ^ (if sends nb messages then
        let ss = string_of_int (s_size nb messages) in
-       arg ("uint8_t       msg" ^ current  ^ "[" ^ ss ^ "]")
+       arg ("uint8_t         msg" ^ current  ^ "[" ^ ss ^ "]")
      else "")
   ^ (if receives nb then
        let rs = string_of_int (r_size nb messages) in
-       arg ("const uint8_t msg" ^ previous ^ "[" ^ rs ^ "]")
+       arg ("const uint8_t   msg" ^ previous ^ "[" ^ rs ^ "]")
      else "")
   ^ ")"
 
@@ -322,8 +322,6 @@ let print_source_prefix channel =
     [ "#include <monocypher.h>"
     ; "#include \"monokex.h\""
     ; ""
-    ; "#define FOR(i, start, end)   "
-      ^ "for (size_t (i) = (start); (i) < (end); (i)++)"
     ; "#define WIPE_CTX(ctx)        crypto_wipe(ctx   , sizeof(*(ctx)))"
     ; "#define WIPE_BUFFER(buffer)  crypto_wipe(buffer, sizeof(buffer))"
     ; ""
@@ -332,16 +330,16 @@ let print_source_prefix channel =
     ; ""
     ; "static void copy32(uint8_t out[32], const uint8_t in[32])"
     ; "{"
-    ; "    FOR (i, 0, 32){out[i] = in[i];}"
+    ; "    for (size_t i = 0; i < 32; i++) { out[i]  = in[i]; }"
     ; "}"
     ; "static void xor32 (uint8_t out[32], const uint8_t in[32])"
     ; "{"
-    ; "    FOR (i, 0, 32){out[i]^= in[i];}"
+    ; "    for (size_t i = 0; i < 32; i++) { out[i] ^= in[i]; }"
     ; "}"
     ; ""
-    ; "static void kex_update_key(crypto_kex_ctx  *ctx,"
-    ; "                           const uint8_t secret_key[32],"
-    ; "                           const uint8_t public_key[32])"
+    ; "static void kex_update_key(crypto_kex_ctx *ctx,"
+    ; "                           const uint8_t   secret_key[32],"
+    ; "                           const uint8_t   public_key[32])"
     ; "{"
     ; "    // Extract"
     ; "    uint8_t shared_secret[32];"
@@ -400,9 +398,9 @@ let print_source_prefix channel =
     ; ""
     ; "static void kex_init(crypto_kex_ctx *ctx)"
     ; "{"
-    ; "    copy32(ctx->chaining_key     , zero       );"
-    ; "    copy32(ctx->derived_keys + 32, zero       );"
-      ^ "// first encryption key is zero"
+    ; "    copy32(ctx->chaining_key     , zero);"
+    ; "    copy32(ctx->derived_keys + 32, zero);"
+      ^ "  // first encryption key is zero"
     ; "    ctx->transcript_size = 0;"
     ; "}"
     ; ""
