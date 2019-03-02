@@ -188,7 +188,6 @@ let receive_key message_number nb_keys key =
   ^ ", "                     ^ str_msg message_number
   ^                            message_offset_space nb_keys
   ^ "      );  // "          ^ key_comment key message_number
-  ^ key_comment key message_number
   ^ "\n"
 
 let send_key message_number nb_keys key =
