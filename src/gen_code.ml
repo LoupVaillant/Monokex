@@ -57,6 +57,10 @@ let is_authenticated (cs : cs) (protocol : Proto.protocol) = match cs with
   | Client -> client_keys (fst protocol @ snd protocol) <> []
   | Server -> server_keys (fst protocol @ snd protocol) <> []
 
+let uses_ephemeral cs protocol = match cs with
+  | Client -> client_keys (snd protocol) // ((=) Proto.E) <> []
+  | Server -> server_keys (snd protocol) // ((=) Proto.E) <> []
+
 let cs_of_keys messages =
   messages /@ (function Proto.Client _ -> Client
                       | Proto.Server _ -> Server)
@@ -76,33 +80,31 @@ let lr_of_protocol (cs : cs) (protocol : Proto.protocol) =
 let indent n s = String.make n ' ' ^ s
 
 let init_proto pattern cs protocol =
-  let authenticated = is_authenticated cs protocol                  in
-  let lr            = lr_of_protocol   cs protocol                  in
-  if not authenticated && List.mem Local lr then error "init_body";
+  let lr    = lr_of_protocol   cs protocol                          in
   let css   = match cs with Client -> "client" | Server -> "server" in
-  let fn    = "void monokex_" ^ pattern ^ "_init_" ^  css ^ "("     in
+  let fn    = "void crypto_kex_" ^ pattern ^ "_init_" ^  css ^ "("  in
   let arg a = ",\n" ^ indent (String.length fn) a                   in
   let seed  = arg "uint8_t       random_seed[32]"                   in
   let sk    = arg "const uint8_t local_sk   [32]"                   in
   let pk    = arg "const uint8_t local_pk   [32]"                   in
   let r     = arg "const uint8_t remote_pk  [32]"                   in
-  fn ^ "monokex_ctx  *ctx"
-  ^ seed
-  ^ (if authenticated      then sk ^ pk else "")
-  ^ (if List.mem Remote lr then r       else "")
+  fn ^ "crypto_kex_ctx  *ctx"
+  ^ (if uses_ephemeral   cs protocol then seed    else "")
+  ^ (if is_authenticated cs protocol then sk ^ pk else "")
+  ^ (if List.mem Remote lr           then r       else "")
   ^ ")"
 
 let init_body cs protocol =
-  let authenticated = is_authenticated cs protocol                           in
-  let lr            = lr_of_protocol   cs protocol                           in
-  let line l        = "    " ^  l ^ "\n"                                     in
-  let seed          = line "kex_seed   (ctx, random_seed);"                  in
-  let sk_pk         = line "kex_locals (ctx, local_sk, local_pk);"           in
-  let r             = line "kex_receive(ctx, ctx->remote_pk, remote_pk);"    in
-  let l             = line "kex_receive(ctx, ctx->local_pk, ctx->local_pk);" in
+  let lr     = lr_of_protocol   cs protocol                        in
+  let init   = "kex_init   (ctx);\n"                               in
+  let seed   = "kex_seed   (ctx, random_seed);\n"                  in
+  let sk_pk  = "kex_locals (ctx, local_sk, local_pk);\n"           in
+  let r      = "kex_receive(ctx, ctx->remote_pk, remote_pk);\n"    in
+  let l      = "kex_receive(ctx, ctx->local_pk, ctx->local_pk);\n" in
   "\n{\n"
-  ^ seed
-  ^ (if authenticated then sk_pk else "")
+  ^ init
+  ^ (if uses_ephemeral   cs protocol then seed  else "")
+  ^ (if is_authenticated cs protocol then sk_pk else "")
   ^ (lr /@ (function Local -> l | Remote -> r) |> String.concat "")
   ^ "}\n"
 
@@ -151,11 +153,11 @@ let message_proto pattern nb messages =
   let return_type = if verifies nb messages then "int" else "void"            in
   let current     = string_of_int nb                                          in
   let previous    = string_of_int (nb - 1)                                    in
-  let fn          = return_type ^ " monokex_" ^ pattern ^ "_" ^ current ^ "(" in
+  let fn          = return_type ^ " crypto_kex_" ^ pattern^"_"^current ^ "("  in
   let arg a       = ",\n" ^ indent (String.length fn) a                       in
   let sk          = arg  "uint8_t       session_key[32]"                      in
   let rk          = arg  "uint8_t       remote_pk[32]"                        in
-  fn ^ "monokex_ctx  *ctx"
+  fn ^ "crypto_kex_ctx  *ctx"
   ^ (if session_key then sk   else "")
   ^ (if remote      then rk   else "")
   ^ (if sends nb messages then
@@ -311,14 +313,14 @@ let print_header_prefix channel =
     ; "    uint8_t remote_pk   [32];"
     ; "    uint8_t remote_pke  [32];"
     ; "    size_t  transcript_size;"
-    ; "} monokex_ctx;"
+    ; "} crypto_kex_ctx;"
     ; ""
     ]
 
 let print_source_prefix channel =
   print_lines channel
     [ "#include <monocypher.h>"
-    ; "#include \"handshake.h\""
+    ; "#include \"monokex.h\""
     ; ""
     ; "#define FOR(i, start, end)   "
       ^ "for (size_t (i) = (start); (i) < (end); (i)++)"
@@ -329,11 +331,15 @@ let print_source_prefix channel =
     ; "static const uint8_t one [16] = {1};"
     ; ""
     ; "static void copy32(uint8_t out[32], const uint8_t in[32])"
-      ^ "{FOR (i, 0, 32){out[i] = in[i];}}"
+    ; "{"
+    ; "    FOR (i, 0, 32){out[i] = in[i];}"
+    ; "}"
     ; "static void xor32 (uint8_t out[32], const uint8_t in[32])"
-      ^ "{FOR (i, 0, 32){out[i]^= in[i];}}"
+    ; "{"
+    ; "    FOR (i, 0, 32){out[i]^= in[i];}"
+    ; "}"
     ; ""
-    ; "static void kex_update_key(monokex_ctx  *ctx,"
+    ; "static void kex_update_key(crypto_kex_ctx  *ctx,"
     ; "                           const uint8_t secret_key[32],"
     ; "                           const uint8_t public_key[32])"
     ; "{"
@@ -354,13 +360,13 @@ let print_source_prefix channel =
     ; "    WIPE_CTX(&chacha_ctx);"
     ; "}"
     ; ""
-    ; "static void kex_auth(monokex_ctx *ctx, uint8_t mac[16])"
+    ; "static void kex_auth(crypto_kex_ctx *ctx, uint8_t mac[16])"
     ; "{"
     ; "    crypto_poly1305(mac, ctx->transcript, ctx->transcript_size,"
     ; "                    ctx->derived_keys);"
     ; "}"
     ; ""
-    ; "static int kex_verify(monokex_ctx *ctx, const uint8_t mac[16])"
+    ; "static int kex_verify(crypto_kex_ctx *ctx, const uint8_t mac[16])"
     ; "{"
     ; "    uint8_t real_mac[16];"
     ; "    kex_auth(ctx, real_mac);"
@@ -370,7 +376,7 @@ let print_source_prefix channel =
     ; "    return mismatch;"
     ; "}"
     ; ""
-    ; "static void kex_send(monokex_ctx *ctx,"
+    ; "static void kex_send(crypto_kex_ctx *ctx,"
     ; "                     uint8_t msg[32], const uint8_t src[32])"
     ; "{"
     ; "    // Send message, encrypted if we have a key"
@@ -381,7 +387,7 @@ let print_source_prefix channel =
     ; "    ctx->transcript_size += 32;"
     ; "}"
     ; ""
-    ; "static void kex_receive(monokex_ctx *ctx,"
+    ; "static void kex_receive(crypto_kex_ctx *ctx,"
     ; "                        uint8_t dest[32], const uint8_t msg[32])"
     ; "{"
     ; "    // Record incoming message"
@@ -392,25 +398,30 @@ let print_source_prefix channel =
     ; "    xor32(dest, ctx->derived_keys + 32);"
     ; "}"
     ; ""
-    ; "static void kex_seed(crypto_kex_ctx *ctx,"
-    ; "                     uint8_t         random_seed[32])"
+    ; "static void kex_init(crypto_kex_ctx *ctx)"
     ; "{"
     ; "    copy32(ctx->chaining_key     , zero       );"
-    ; "    copy32(ctx->derived_keys + 32, zero       ); // first encryption key is zero"
+    ; "    copy32(ctx->derived_keys + 32, zero       );"
+      ^ "// first encryption key is zero"
+    ; "    ctx->transcript_size = 0;"
+    ; "}"
+    ; ""
+    ; "static void kex_seed(crypto_kex_ctx *ctx, uint8_t random_seed[32])"
+    ; "{"
     ; "    copy32(ctx->local_ske        , random_seed);"
     ; "    crypto_wipe(random_seed, 32); // auto wipe seed to avoid reuse"
     ; "    crypto_x25519_public_key(ctx->local_pke, ctx->local_ske);"
-    ; "    ctx->transcript_size  = 0;"
     ; "}"
     ; ""
     ; "static void kex_locals(crypto_kex_ctx *ctx,"
     ; "                       const uint8_t   local_sk   [32],"
     ; "                       const uint8_t   local_pk   [32])"
     ; "{"
-    ; "    if (local_pk == 0) crypto_x25519_public_key(ctx->local_pk, local_sk);"
-    ; "    else               copy32                  (ctx->local_pk, local_pk);"
+    ;"    if (local_pk == 0) crypto_x25519_public_key(ctx->local_pk, local_sk);"
+    ;"    else               copy32                  (ctx->local_pk, local_pk);"
     ; "    copy32(ctx->local_sk         , local_sk   );"
     ; "}"
+    ; ""
     ]
 
 let block_comment comment =
