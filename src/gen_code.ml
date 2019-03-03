@@ -94,15 +94,15 @@ let init_proto pattern cs protocol =
   ^ (if List.mem Remote lr           then r       else "")
   ^ ")"
 
-let init_body cs protocol =
+let init_body pattern cs protocol =
   let lr     = lr_of_protocol   cs protocol                            in
-  let init   = "    kex_init   (ctx);\n"                               in
+  let name   = "    KEX_INIT   (ctx, \"Monokex " ^ pattern ^ "\");\n"  in
   let seed   = "    kex_seed   (ctx, random_seed);\n"                  in
   let sk_pk  = "    kex_locals (ctx, local_sk, local_pk);\n"           in
   let r      = "    kex_receive(ctx, ctx->remote_pk, remote_pk);\n"    in
   let l      = "    kex_receive(ctx, ctx->local_pk, ctx->local_pk);\n" in
   "\n{\n"
-  ^ init
+  ^ name
   ^ (if uses_ephemeral   cs protocol then seed  else "")
   ^ (if is_authenticated cs protocol then sk_pk else "")
   ^ (lr /@ (function Local -> l | Remote -> r) |> String.concat "")
@@ -113,7 +113,8 @@ let init_header pattern cs protocol =
   init_proto pattern cs protocol ^ ";\n"
 
 let init_source pattern cs protocol =
-  init_proto pattern cs protocol ^ init_body cs protocol
+  let lower_pattern = String.lowercase_ascii pattern in
+  init_proto lower_pattern cs protocol ^ init_body pattern cs protocol
 
 (* message_proto & message_body helpers *)
 (* nb reffers to the function number, and starts at 1 *)
@@ -395,13 +396,13 @@ let print_source_prefix channel =
     ; "    xor32(dest, ctx->derived_keys + 32);"
     ; "}"
     ; ""
-    ; "static void kex_init(crypto_kex_ctx *ctx)"
-    ; "{"
-    ; "    copy32(ctx->chaining_key     , zero);"
-    ; "    copy32(ctx->derived_keys + 32, zero);"
-      ^ "  // first encryption key is zero"
-    ; "    ctx->transcript_size = 0;"
-    ; "}"
+    ; "// Could be a function, but it would prevent the compiler from"
+    ; "// noticing when id exceeds 32 bytes."
+    ; "#define KEX_INIT(ctx, id)                 \\"
+    ; "    static const uint8_t ck0[32] = id;    \\"
+    ; "    copy32(ctx->chaining_key, ck0);       \\"
+    ; "    copy32(ctx->derived_keys + 32, zero); \\"
+    ; "    ctx->transcript_size = 0"
     ; ""
     ; "static void kex_seed(crypto_kex_ctx *ctx, uint8_t random_seed[32])"
     ; "{"
@@ -442,8 +443,8 @@ let print_source_pattern channel pattern protocol =
   let lower_pattern = String.lowercase_ascii pattern in
   print_lines channel
     [ block_comment pattern
-    ; init_source lower_pattern Client protocol
-    ; init_source lower_pattern Server protocol
+    ; init_source pattern Client protocol
+    ; init_source pattern Server protocol
     ];
   let messages    = snd protocol         in
   let nb_messages = List.length messages in

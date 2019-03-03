@@ -90,7 +90,7 @@ let chaining_keys : Proto.protocol -> string = fun p ->
   let exchanges = all_exchanges p                                         in
   let e         = exchanges /@ string_of_exchange                         in
   let ck        = exchanges |> mapi 1 (fun i _ -> "CK" ^ string_of_int i) in
-  let ck0       = "zero" :: List.map (fun c -> c ^ " ") ck                in
+  let ck0       = "CK0" :: ck                                             in
   map3 (fun ck ck0 e -> "- __"                     ^ ck
                         ^ ":__ HChacha20("         ^ e
                         ^ ", zero) XOR HChacha20(" ^ ck0
@@ -247,13 +247,14 @@ let print : out_channel -> string -> Proto.protocol -> unit =
   pe "";
   pe "Those shared secrets are hashed to derive the following keys:";
   pe "";
+  pe ("- __CK0:__ \"Monokex " ^ pattern ^ "\"");
   ps (chaining_keys   p);
   ps (auth_keys       p);
   ps (encryption_keys p);
   ps (payload_keys    p);
   pe "";
   pe "_(\"[x:y]\" denotes a range; zero, one, and two are encoded in little";
-  pe "endian format.)_";
+  pe "endian format.  CK0 is 32 bytes, ASCII encoded, zero padded.)_";
   pe "";
   pe "The messages contain the following (`||` denotes concatenation):";
   pe "";
