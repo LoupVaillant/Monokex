@@ -40,8 +40,11 @@ let last_action_was_encrypted_key st =
 let check_can_send_key st = match st.last_action with
   | Exchange _ -> ()
   | Key      _ -> error_if (st.exchanges <> [])
-                    ("Two encrypted keys in a row.  "
-                     ^ "Interleave an exchange first.")
+                    ("Unimplemented feature: "
+                     ^ "two encrypted keys in a row.  "
+                     ^ "Interleave an exchange first.\n"
+                     ^ "If you have a compelling use case for this, "
+                     ^ "file a bug.  We might add support for it later.")
 
 let string_of_exchange : exchange -> string = function
   | (S, S) -> "ss"
