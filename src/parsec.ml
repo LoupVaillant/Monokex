@@ -76,10 +76,11 @@ let message        = sep_by action (token Comma) "comma separated actions"
 let client_message = (fun m -> Client m) <$> token Right *> message
 let server_message = (fun m -> Server m) <$> token Left  *> message
 let any_message    = client_message <|> server_message
+let protocol_name  = name <* (token Column <?> "column")
 let protocol       = (fun pre -> function
                        | []   -> ([] , pre )
                        | post -> (pre, post))
                      <$> many any_message
                      <*> (token Dots *> (many any_message)
                           <|> pure [])
-let protocols      = many (pair <$> (name <* token Column) <*> protocol)
+let protocols      = many (pair <$> protocol_name <*> protocol)
