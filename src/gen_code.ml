@@ -52,6 +52,12 @@ let rec first_auth = function
 type cs = Client | Server
 type lr = Local  | Remote
 
+let select_cs cs a b = match cs with Client -> a | Server -> b
+let select_lr lr a b = match lr with Local  -> a | Remote -> b
+
+let local  cs = select_cs cs "client" "server"
+let remote cs = select_cs cs "server" "client"
+
 (* init_header and init_source helpers *)
 let is_authenticated (cs : cs) (protocol : Proto.protocol) = match cs with
   | Client -> client_keys (fst protocol @ snd protocol) <> []
@@ -80,14 +86,14 @@ let lr_of_protocol (cs : cs) (protocol : Proto.protocol) =
 let indent n s = String.make n ' ' ^ s
 
 let init_proto pattern cs protocol =
-  let lr    = lr_of_protocol   cs protocol                          in
-  let css   = match cs with Client -> "client" | Server -> "server" in
-  let fn    = "void crypto_kex_" ^ pattern ^ "_init_" ^  css ^ "("  in
-  let arg a = ",\n" ^ indent (String.length fn) a                   in
-  let seed  = arg "uint8_t         random_seed[32]"                 in
-  let sk    = arg "const uint8_t   local_sk   [32]"                 in
-  let pk    = arg "const uint8_t   local_pk   [32]"                 in
-  let r     = arg "const uint8_t   remote_pk  [32]"                 in
+  let lr     = lr_of_protocol   cs protocol                          in
+  let css    = match cs with Client -> "client" | Server -> "server" in
+  let fn     = "void crypto_kex_" ^ pattern ^ "_init_" ^  css ^ "("  in
+  let arg a  = ",\n" ^ indent (String.length fn) a                   in
+  let seed   = arg "uint8_t         random_seed[32]"                 in
+  let sk     = arg "const uint8_t   " ^ local  cs ^ "_sk  [32]"      in
+  let pk     = arg "const uint8_t   " ^ local  cs ^ "_pk  [32]"      in
+  let r      = arg "const uint8_t   " ^ remote cs ^ "_pk  [32]"      in
   fn ^ "crypto_kex_ctx *ctx"
   ^ (if uses_ephemeral   cs protocol then seed    else "")
   ^ (if is_authenticated cs protocol then sk ^ pk else "")
@@ -95,12 +101,13 @@ let init_proto pattern cs protocol =
   ^ ")"
 
 let init_body pattern cs protocol =
-  let lr     = lr_of_protocol   cs protocol                            in
-  let name   = "    KEX_INIT   (ctx, \"Monokex " ^ pattern ^ "\");\n"  in
-  let seed   = "    kex_seed   (ctx, random_seed);\n"                  in
-  let sk_pk  = "    kex_locals (ctx, local_sk, local_pk);\n"           in
-  let r      = "    kex_receive(ctx, ctx->remote_pk, remote_pk);\n"    in
-  let l      = "    kex_receive(ctx, ctx->local_pk, ctx->local_pk);\n" in
+  let lr     = lr_of_protocol   cs protocol                                in
+  let name   = "    KEX_INIT   (ctx, \"Monokex " ^ pattern ^ "\");\n"      in
+  let seed   = "    kex_seed   (ctx, random_seed);\n"                      in
+  let sk_pk  = "    kex_locals (ctx, " ^ local cs ^ "_sk, "
+               ^                         local cs ^ "_pk);\n"              in
+  let r      = "    kex_receive(ctx, ctx->remote_pk, "^remote cs^"_pk);\n" in
+  let l      = "    kex_receive(ctx, ctx->local_pk, ctx->local_pk);\n"     in
   "\n{\n"
   ^ name
   ^ (if uses_ephemeral   cs protocol then seed  else "")
@@ -149,7 +156,8 @@ let s_size nb messages =
   k_size + t_size
 
 let message_proto pattern nb messages =
-  let remote      = List.mem (Proto.Key Proto.S) (r_actions nb messages)      in
+  let cs          = if nb mod 2 = 1 then Client else Server                   in
+  let gets_remote = List.mem (Proto.Key Proto.S) (r_actions nb messages)      in
   let session_key = nb >= List.length messages                                in
   let return_type = if verifies nb messages then "int" else "void"            in
   let current     = string_of_int nb                                          in
@@ -157,10 +165,10 @@ let message_proto pattern nb messages =
   let fn          = return_type ^ " crypto_kex_" ^ pattern^"_"^current ^ "("  in
   let arg a       = ",\n" ^ indent (String.length fn) a                       in
   let sk          = arg  "uint8_t         session_key[32]"                    in
-  let rk          = arg  "uint8_t         remote_pk[32]"                      in
+  let rk          = arg  "uint8_t         " ^ remote cs ^ "_pk[32]"           in
   fn ^ "crypto_kex_ctx *ctx"
   ^ (if session_key then sk   else "")
-  ^ (if remote      then rk   else "")
+  ^ (if gets_remote then rk   else "")
   ^ (if sends nb messages then
        let ss = string_of_int (s_size nb messages) in
        arg ("uint8_t         msg" ^ current  ^ "[" ^ ss ^ "]")
@@ -184,7 +192,7 @@ let message_offset_space nb_keys =
   else " + " ^ message_offset nb_keys
 
 let receive_key message_number nb_keys key =
-  let ctx_key = map_es "ctx->remote_pke" "ctx->remote_pk " key    in
+  let ctx_key = map_es "ctx->remote_pke" "ctx->remote_pk " key in
   "    kex_receive   (ctx, " ^ ctx_key
   ^ ", "                     ^ str_msg message_number
   ^                            message_offset_space nb_keys
@@ -192,7 +200,7 @@ let receive_key message_number nb_keys key =
   ^ "\n"
 
 let send_key message_number nb_keys key =
-  let ctx_key = map_es "ctx->local_pke" "ctx->local_pk " key        in
+  let ctx_key = map_es "ctx->local_pke" "ctx->local_pk " key in
   "    kex_send      (ctx, " ^ str_msg message_number
   ^                            message_offset_space nb_keys
   ^ "      , "               ^ ctx_key
@@ -253,7 +261,7 @@ let send_message    = process_message send_key
 let message_body nb messages =
   let cs          = if nb mod 2 == 1 then Client else Server             in
   let session_key = nb >= List.length messages                           in
-  let remote      = List.mem (Proto.Key Proto.S) (r_actions nb messages) in
+  let gets_remote = List.mem (Proto.Key Proto.S) (r_actions nb messages) in
   "\n{\n"
   ^ (if receives nb
      then
@@ -275,8 +283,8 @@ let message_body nb messages =
           else "")
      else ""
     )
-  ^ (if remote
-     then "    copy32(remote_pk  , ctx->remote_pk);\n"
+  ^ (if gets_remote
+     then "    copy32(" ^ remote cs ^ "_pk  , ctx->remote_pk);\n"
      else "")
   ^ (if session_key
      then "    copy32(session_key, ctx->derived_keys + 32);\n"
