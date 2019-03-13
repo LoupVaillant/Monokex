@@ -86,15 +86,15 @@ let lr_of_protocol (cs : cs) (protocol : Proto.protocol) =
 let indent n s = String.make n ' ' ^ s
 
 let init_proto pattern cs protocol =
-  let lr     = lr_of_protocol   cs protocol                          in
-  let css    = match cs with Client -> "client" | Server -> "server" in
-  let fn     = "void crypto_kex_" ^ pattern ^ "_init_" ^  css ^ "("  in
-  let arg a  = ",\n" ^ indent (String.length fn) a                   in
-  let seed   = arg "uint8_t         random_seed[32]"                 in
-  let sk     = arg "const uint8_t   " ^ local  cs ^ "_sk  [32]"      in
-  let pk     = arg "const uint8_t   " ^ local  cs ^ "_pk  [32]"      in
-  let r      = arg "const uint8_t   " ^ remote cs ^ "_pk  [32]"      in
-  fn ^ "crypto_kex_ctx *ctx"
+  let lr     = lr_of_protocol   cs protocol                            in
+  let css    = match cs with Client -> "client" | Server -> "server"   in
+  let fn     = "void crypto_kex_" ^ pattern ^ "_init_" ^  css ^ "("    in
+  let arg a  = ",\n" ^ indent (String.length fn) a                     in
+  let seed   = arg "uint8_t                random_seed[32]"            in
+  let sk     = arg "const uint8_t          " ^ local  cs ^ "_sk  [32]" in
+  let pk     = arg "const uint8_t          " ^ local  cs ^ "_pk  [32]" in
+  let r      = arg "const uint8_t          " ^ remote cs ^ "_pk  [32]" in
+  fn ^ "crypto_kex_" ^ local cs ^ "_ctx *" ^ local cs ^ "_ctx"
   ^ (if uses_ephemeral   cs protocol then seed    else "")
   ^ (if is_authenticated cs protocol then sk ^ pk else "")
   ^ (if List.mem Remote lr           then r       else "")
@@ -109,6 +109,7 @@ let init_body pattern cs protocol =
   let r      = "    kex_receive(ctx, ctx->remote_pk, "^remote cs^"_pk);\n" in
   let l      = "    kex_receive(ctx, ctx->local_pk, ctx->local_pk);\n"     in
   "\n{\n"
+  ^ "    crypto_kex_ctx *ctx = &(" ^ local cs ^ "_ctx->ctx);\n"
   ^ name
   ^ (if uses_ephemeral   cs protocol then seed  else "")
   ^ (if is_authenticated cs protocol then sk_pk else "")
@@ -164,18 +165,21 @@ let message_proto pattern nb messages =
   let previous    = string_of_int (nb - 1)                                    in
   let fn          = return_type ^ " crypto_kex_" ^ pattern^"_"^current ^ "("  in
   let arg a       = ",\n" ^ indent (String.length fn) a                       in
-  let sk          = arg  "uint8_t         session_key[32]"                    in
-  let rk          = arg  "uint8_t         " ^ remote cs ^ "_pk[32]"           in
-  fn ^ "crypto_kex_ctx *ctx"
+  let pk_blank    = if session_key then "  " else ""                          in
+  let msg_blank   = pk_blank ^ if session_key||gets_remote then"     "else "" in
+  let sk          = arg  "uint8_t                session_key[32]"             in
+  let rk          = arg  "uint8_t                " ^ remote cs ^ "_pk"
+                    ^ pk_blank ^ "[32]"                                       in
+  fn ^ "crypto_kex_" ^ local cs ^ "_ctx *" ^ local cs ^ "_ctx"
   ^ (if session_key then sk   else "")
   ^ (if gets_remote then rk   else "")
   ^ (if sends nb messages then
        let ss = string_of_int (s_size nb messages) in
-       arg ("uint8_t         msg" ^ current  ^ "[" ^ ss ^ "]")
+       arg ("uint8_t                msg" ^ current  ^ msg_blank^ "[" ^ ss ^ "]")
      else "")
   ^ (if receives nb then
        let rs = string_of_int (r_size nb messages) in
-       arg ("const uint8_t   msg" ^ previous ^ "[" ^ rs ^ "]")
+       arg ("const uint8_t          msg" ^ previous ^ msg_blank^ "[" ^ rs ^ "]")
      else "")
   ^ ")"
 
@@ -263,6 +267,7 @@ let message_body nb messages =
   let session_key = nb >= List.length messages                           in
   let gets_remote = List.mem (Proto.Key Proto.S) (r_actions nb messages) in
   "\n{\n"
+  ^ "    crypto_kex_ctx *ctx = &(" ^ local cs ^ "_ctx->ctx);\n"
   ^ (if receives nb
      then
        let message = List.nth messages (nb - 2) |> actions in
@@ -322,6 +327,9 @@ let print_header_prefix channel =
     ; "    uint8_t remote_pke  [32];"
     ; "    size_t  transcript_size;"
     ; "} crypto_kex_ctx;"
+    ; ""
+    ; "typedef struct { crypto_kex_ctx ctx; } crypto_kex_client_ctx;"
+    ; "typedef struct { crypto_kex_ctx ctx; } crypto_kex_server_ctx;"
     ; ""
     ]
 
