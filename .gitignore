@@ -4,5 +4,4 @@ gen/*
 *.out
 *~
 
-src/proto.mli
 src/scan.ml

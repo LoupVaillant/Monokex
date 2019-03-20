@@ -17,7 +17,7 @@ all: gen
 repl: src/repl.out
 clean:
 	rm -f src/*.cmi src/*.cmo
-	rm -f src/scan.ml src/proto.mli
+	rm -f src/scan.ml
 	rm -f gen.out src/repl.out
 	rm -rf gen
 
@@ -26,13 +26,11 @@ gen: gen.out protocols.txt
 	./gen.out gen < protocols.txt
 
 gen.out: src/main.ml $(SRC)
-	cp src/proto.ml src/proto.mli
 	ocamlc $(OFLAGS) $(MLI) -c
 	ocamlc $(OFLAGS) $(SRC) -c
 	ocamlc $(OFLAGS) $(CMO) $< -o $@
 
 src/repl.out: $(SRC)
-	cp src/proto.ml src/proto.mli
 	ocamlc     $(OFLAGS) $(MLI) -c
 	ocamlc     $(OFLAGS) $(SRC) -c
 	ocamlmktop $(OFLAGS) $(CMO) -o $@
