@@ -1,39 +1,16 @@
 open Utils
+module P = Proto
 
-(* Protocol manipulation *)
-let map_cs c s = function
-  | Proto.Client actions -> c actions
-  | Proto.Server actions -> s actions
-
-let map_ke k e = function
-  | Proto.Key      key      -> k key
-  | Proto.Exchange exchange -> e exchange
-
-let map_es e s = function
-  | Proto.E -> e
-  | Proto.S -> s
-
-let actions = function
-  | Proto.Client acts -> acts
-  | Proto.Server acts -> acts
-
-let is_client_message = map_cs (const true ) (const false)
-let is_server_message = map_cs (const false) (const true )
-let is_key            = map_ke (const true ) (const false)
-let is_exchange       = map_ke (const false) (const true )
-let to_key            = map_ke id (f_error "to_key")
-let to_exchange       = map_ke (f_error "to_exchange") id
-
-let keys            message  = message  // is_key            /@ to_key
-let exchanges       message  = message  // is_exchange       /@ to_exchange
-let client_messages messages = messages // is_client_message /@ actions
-let server_messages messages = messages // is_server_message /@ actions
+let keys            message  = message  // P.is_key      /@ P.to_key
+let exchanges       message  = message  // P.is_exchange /@ P.to_exchange
+let client_messages messages = messages // P.is_client   /@ P.to_actions
+let server_messages messages = messages // P.is_server   /@ P.to_actions
 
 let client_keys messages = client_messages messages |> List.concat |> keys
 let server_keys messages = server_messages messages |> List.concat |> keys
 
-let has_key      message = message |> actions |> keys      |> (<>) []
-let has_exchange message = message |> actions |> exchanges |> (<>) []
+let has_key      message = message |> P.to_actions |> keys      |> (<>) []
+let has_exchange message = message |> P.to_actions |> exchanges |> (<>) []
 
 let rec first_auth = function
   | []        -> error "first_auth: protocol makes no key exchange"
@@ -131,9 +108,9 @@ let verifies nb messages = first_auth messages <  nb
 let auths    nb messages = first_auth messages <= nb
 
 let r_actions nb messages = if not (receives nb) then []
-                            else actions (List.nth messages (nb - 2))
+                            else P.to_actions (List.nth messages (nb - 2))
 let s_actions nb messages = if not (sends nb messages) then []
-                            else actions (List.nth messages (nb - 1))
+                            else P.to_actions (List.nth messages (nb - 1))
 
 let r_size nb messages =
   check (receives nb) "r_size";
@@ -180,7 +157,7 @@ let message_proto pattern nb messages =
 
 let str_msg nb  = "msg" ^ string_of_int nb
 let key_comment key nb =
-  (if nb mod 2 = 0 then "<- R" else "-> I") ^ map_es "E" "S" key
+  (if nb mod 2 = 0 then "<- R" else "-> I") ^ P.map_key "E" "S" key
 
 let message_offset       nb_keys = string_of_int (nb_keys * 32)
 let message_offset_space nb_keys =
@@ -189,7 +166,7 @@ let message_offset_space nb_keys =
   else " + " ^ message_offset nb_keys
 
 let receive_key message_number nb_keys key =
-  let ctx_key = map_es "ctx->remote_pke" "ctx->remote_pk " key in
+  let ctx_key = P.map_key "ctx->remote_pke" "ctx->remote_pk " key in
   "    kex_receive   (ctx, " ^ ctx_key
   ^ ", "                     ^ str_msg message_number
   ^                            message_offset_space nb_keys
@@ -197,7 +174,7 @@ let receive_key message_number nb_keys key =
   ^ "\n"
 
 let send_key message_number nb_keys key =
-  let ctx_key = map_es "ctx->local_pke" "ctx->local_pk " key in
+  let ctx_key = P.map_key "ctx->local_pke" "ctx->local_pk " key in
   "    kex_send      (ctx, " ^ str_msg message_number
   ^                            message_offset_space nb_keys
   ^ "      , "               ^ ctx_key
@@ -241,12 +218,12 @@ let rec counts p start = function
   | []      -> []
   | x :: xs -> let new_start = (if p x then 1 else 0) + start in
                new_start :: counts p new_start xs
-let key_counts = counts is_key (-1)
+let key_counts = counts P.is_key (-1)
 
 let process_message process_key cs message_number message =
   List.map2
     (fun ke count ->
-      map_ke (process_key message_number count) (exchange cs) ke
+      P.map_action (process_key message_number count) (exchange cs) ke
     )
     message
     (key_counts message)
@@ -263,8 +240,8 @@ let message_body nb messages =
   ^ "    crypto_kex_ctx *ctx = &(" ^ local cs ^ "_ctx->ctx);\n"
   ^ (if receives nb
      then
-       let message = List.nth messages (nb - 2) |> actions in
-       let nb_keys = List.length (keys message)            in
+       let message = List.nth messages (nb - 2) |> P.to_actions in
+       let nb_keys = List.length (keys message)                 in
        receive_message cs (nb - 1) message
        ^ (if verifies nb messages
           then verify (nb - 1) nb_keys
@@ -273,8 +250,8 @@ let message_body nb messages =
     )
   ^ (if sends nb messages
      then
-       let message = List.nth messages (nb - 1) |> actions in
-       let nb_keys = List.length (keys message)            in
+       let message = List.nth messages (nb - 1) |> P.to_actions in
+       let nb_keys = List.length (keys message)                 in
        send_message cs nb message
        ^ (if auths nb messages
           then auth nb nb_keys
