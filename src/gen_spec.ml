@@ -59,11 +59,11 @@ let chaining_keys : P.protocol -> string = fun p ->
   let exchanges = P.all_exchanges p                                       in
   let e         = exchanges /@ string_of_exchange                         in
   let ck        = exchanges |> mapi 1 (fun i _ -> "CK" ^ string_of_int i) in
-  let ck0       = "CK0" :: ck                                             in
-  map3 (fun ck ck0 e -> "- __"                     ^ ck
-                        ^ ":__ HChacha20("         ^ e
-                        ^ ", zero) XOR HChacha20(" ^ ck0
-                        ^ ", one)\n")
+  let ck0       = "       " :: (ck  /@  ((^) "XOR " ))                    in
+  map3 (fun ck ck0 e -> "- __"                       ^ ck
+                        ^ ":__ HChacha20(HChacha20(" ^ e
+                        ^ ", zero) "                 ^ ck0
+                        ^ ", pid)\n")
     ck ck0 e
   |> String.concat ""
 
@@ -224,14 +224,13 @@ let print : out_channel -> string -> P.protocol -> unit =
   pe "";
   pe "Those shared secrets are hashed to derive the following keys:";
   pe "";
-  pe ("- __CK0:__ \"Monokex " ^ pattern ^ "\"");
+  pe ("- __pid:__ \"Monokex " ^ pattern ^ "\"  (ASCII, 16 bytes, zero padded)");
   ps (chaining_keys   p);
   ps (auth_keys       p);
   ps (encryption_keys p);
   ps (payload_keys    p);
   pe "";
-  pe "_(\"[x:y]\" denotes a range; zero, one, and two are encoded in little";
-  pe "endian format.  CK0 is 32 bytes, ASCII encoded, zero padded.)_";
+  pe "_(\"[x:y]\" denotes a range; one and two are encoded in little endian.)_";
   pe "";
   pe "The messages contain the following (`||` denotes concatenation):";
   pe "";
