@@ -1,11 +1,4 @@
-(* Utils *)
-let error s    = raise (Invalid_argument s)
-let f_error s  = fun _ -> error s
-let (//) l p   = List.filter p l
-let (/@) l f   = List.map    f l
-let (|-) f g x = g (f x)
-let const x y  = x
-let id    x    = x
+open Utils
 
 type key      = E | S
 type exchange = key * key

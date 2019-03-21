@@ -1,6 +1,7 @@
 OFLAGS = -I src
 
-SRC = src/proto.ml    \
+SRC = src/utils.ml    \
+      src/proto.ml    \
       src/scan.ml     \
       src/parsec.ml   \
       src/validate.ml \

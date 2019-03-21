@@ -1,11 +1,4 @@
-(* Utils *)
-let (//) l p = List.filter p l
-let (/@) l f = List.map    f l
-let error s  = raise (Invalid_argument s)
-let f_error s = fun _ -> error s
-let check assertion s = if not assertion then error s
-let const x y = x
-let id    x   = x
+open Utils
 
 (* Protocol manipulation *)
 let map_cs c s = function

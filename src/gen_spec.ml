@@ -1,10 +1,4 @@
-(* Utils *)
-let (//) l p   = List.filter p l
-let (/@) l f   = List.map    f l
-let (|-) f g x = g (f x)
-let error s    = raise (Invalid_argument s)
-let pair a b   = (a, b)
-let swap f a b = f b a
+open Utils
 
 let rec mapi i f = function
   | x::l -> f i x :: mapi (i+1) f l

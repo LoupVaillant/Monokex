@@ -3,8 +3,6 @@ let iter_pair f l =
   let l1, l2 = List.split l in
   List.iter2 f l1 l2
 
-open Proto
-
 let validate (name, p) =
   match Validate.v p with
   | Validate.Valid        -> ()
