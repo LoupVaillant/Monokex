@@ -34,8 +34,18 @@ val to_exchange   : action    -> exchange (* Fails if action is a key       *)
 val to_cs_key     : cs_action -> cs_key   (* Fails if action is an exchange *)
 val to_cs_exchange: cs_action -> exchange (* Fails if action is a key       *)
 
+val get_keys            : action    list -> key      list
+val get_exchanges       : action    list -> exchange list
+val get_cs_key          : cs_action list -> cs_key   list
+val get_cs_exchange     : cs_action list -> exchange list
+val get_client_messages : message   list -> action list list
+val get_server_messages : message   list -> action list list
+
 val cs_message : message  -> cs_message
 val cs_protocol: protocol -> cs_protocol
 
 val all_keys     : protocol -> cs_key   list
 val all_exchanges: protocol -> exchange list
+
+val client_keys  : protocol -> key list
+val server_keys  : protocol -> key list

@@ -47,6 +47,13 @@ let to_exchange    = map_action    (f_error "to_exchange") id
 let to_cs_key      = map_cs_action id (f_error "to_key")
 let to_cs_exchange = map_cs_action (f_error "to_exchange") id
 
+let get_keys            message  = message  // is_key         /@ to_key
+let get_exchanges       message  = message  // is_exchange    /@ to_exchange
+let get_cs_key          message  = message  // is_cs_key      /@ to_cs_key
+let get_cs_exchange     message  = message  // is_cs_exchange /@ to_cs_exchange
+let get_client_messages messages = messages // is_client      /@ to_actions
+let get_server_messages messages = messages // is_server      /@ to_actions
+
 let cs_message =
   let to_cs_key e s    = map_key (CS_key e) (CS_key s) in
   let to_cs_exchange e = CS_exchange e                 in
@@ -61,8 +68,8 @@ let cs_protocol p =
 let all_keys p =
   to_messages p
   |> List.map (map_message
-                 (fun a -> (a // is_key /@ to_key) /@ map_key IE IS)
-                 (fun a -> (a // is_key /@ to_key) /@ map_key RE RS))
+                 (fun a -> (get_keys a) /@ map_key IE IS)
+                 (fun a -> (get_keys a) /@ map_key RE RS))
   |> List.concat
 
 let all_exchanges p =
@@ -71,3 +78,6 @@ let all_exchanges p =
   |> List.concat
   |> List.filter is_exchange
   |> List.map    to_exchange
+
+let client_keys p = to_messages p |>get_client_messages |>List.concat |>get_keys
+let server_keys p = to_messages p |>get_server_messages |>List.concat |>get_keys
