@@ -69,7 +69,7 @@ let init_proto pattern cs protocol =
 
 let init_body pattern cs protocol =
   let lr     = lr_of_protocol   cs protocol                                in
-  let name   = "    KEX_INIT   (ctx, \"Monokex " ^ pattern ^ "\");\n"      in
+  let init   = "    kex_init   (ctx, pid_" ^ pattern ^ ");\n"              in
   let seed   = "    kex_seed   (ctx, random_seed);\n"                      in
   let sk_pk  = "    kex_locals (ctx, " ^ local cs ^ "_sk, "
                ^                         local cs ^ "_pk);\n"              in
@@ -77,7 +77,7 @@ let init_body pattern cs protocol =
   let l      = "    kex_receive(ctx, ctx->local_pk, ctx->local_pk);\n"     in
   "\n{\n"
   ^ "    " ^ prefix ^ "ctx *ctx = &(" ^ local cs ^ "_ctx->ctx);\n"
-  ^ name
+  ^ init
   ^ (if uses_ephemeral   protocol cs then seed  else "")
   ^ (if is_authenticated protocol cs then sk_pk else "")
   ^ (lr /@ (function Local -> l | Remote -> r) |> String.concat "")
@@ -89,7 +89,7 @@ let init_header pattern cs protocol =
 
 let init_source pattern cs protocol =
   let lower_pattern = String.lowercase_ascii pattern in
-  init_proto lower_pattern cs protocol ^ init_body pattern cs protocol
+  init_proto lower_pattern cs protocol ^ init_body lower_pattern cs protocol
 
 (* message_proto & message_body helpers *)
 (* nb reffers to the function number, and starts at 1 *)
@@ -253,7 +253,7 @@ let message_body nb messages =
      then "    copy32(" ^ remote cs ^ "_pk  , ctx->remote_pk);\n"
      else "")
   ^ (if session_key
-     then "    copy32(session_key, ctx->derived_keys + 32);\n"
+     then "    copy32(session_key, ctx->keys + 96);\n"
           ^ "    WIPE_CTX(ctx);\n"
      else "";)
   ^ (if verifies nb messages
@@ -277,15 +277,15 @@ let print_header_prefix channel =
     ; "#include <stddef.h>"
     ; ""
     ; "typedef struct {"
-    ; "    uint8_t transcript [128];"
-    ; "    uint8_t chaining_key[32];"
-    ; "    uint8_t derived_keys[64];"
-    ; "    uint8_t local_sk    [32];"
-    ; "    uint8_t local_pk    [32];"
-    ; "    uint8_t local_ske   [32];"
-    ; "    uint8_t local_pke   [32];"
-    ; "    uint8_t remote_pk   [32];"
-    ; "    uint8_t remote_pke  [32];"
+    ; "    uint8_t transcript[128];"
+    ; "    uint8_t keys      [128];"
+    ; "    uint8_t local_sk   [32];"
+    ; "    uint8_t local_pk   [32];"
+    ; "    uint8_t local_ske  [32];"
+    ; "    uint8_t local_pke  [32];"
+    ; "    uint8_t remote_pk  [32];"
+    ; "    uint8_t remote_pke [32];"
+    ; "    uint8_t pid        [16];"
     ; "    size_t  transcript_size;"
     ; "} " ^ prefix ^ "ctx;"
     ; ""
@@ -305,6 +305,10 @@ let print_source_prefix channel =
     ; "static const uint8_t zero[32] = {0};"
     ; "static const uint8_t one [16] = {1};"
     ; ""
+    ; "static void copy16(uint8_t out[16], const uint8_t in[16])"
+    ; "{"
+    ; "    for (size_t i = 0; i < 16; i++) { out[i]  = in[i]; }"
+    ; "}"
     ; "static void copy32(uint8_t out[32], const uint8_t in[32])"
     ; "{"
     ; "    for (size_t i = 0; i < 32; i++) { out[i]  = in[i]; }"
@@ -322,26 +326,26 @@ let print_source_prefix channel =
         ]
     ; "{"
     ; "    // Extract"
-    ; "    uint8_t shared_secret[32];"
-    ; "    crypto_x25519(shared_secret, secret_key, public_key);"
-    ; "    crypto_chacha20_H(shared_secret    , shared_secret    , zero);"
-    ; "    crypto_chacha20_H(ctx->chaining_key, ctx->chaining_key, one );"
-    ; "    xor32(ctx->chaining_key, shared_secret);"
+    ; "    uint8_t tmp[32];"
+    ; "    crypto_x25519(tmp, secret_key, public_key);"
+    ; "    crypto_chacha20_H(tmp, tmp, zero);"
+    ; "    xor32(tmp, ctx->keys);"
+    ; "    crypto_chacha20_H(tmp, tmp, ctx->pid);"
     ; ""
-    ; "    // Expand (directly from chaining key)"
+    ; "    // Expand"
     ; "    crypto_chacha_ctx chacha_ctx;"
-    ; "    crypto_chacha20_init  (&chacha_ctx, ctx->chaining_key, one);"
-    ; "    crypto_chacha20_stream(&chacha_ctx, ctx->derived_keys, 64);"
+    ; "    crypto_chacha20_init  (&chacha_ctx, tmp, one);"
+    ; "    crypto_chacha20_stream(&chacha_ctx, ctx->keys, 128);"
     ; ""
     ; "    // Clean up"
-    ; "    WIPE_BUFFER(shared_secret);"
+    ; "    WIPE_BUFFER(tmp);"
     ; "    WIPE_CTX(&chacha_ctx);"
     ; "}"
     ; ""
     ; "static void kex_auth(" ^ prefix ^ "ctx *ctx, uint8_t mac[16])"
     ; "{"
     ; "    crypto_poly1305(mac, ctx->transcript, ctx->transcript_size,"
-    ; "                    ctx->derived_keys);"
+    ; "                    ctx->keys + 32);"
     ; "}"
     ; ""
     ; "static int kex_verify(" ^ prefix ^ "ctx *ctx, const uint8_t mac[16])"
@@ -359,7 +363,7 @@ let print_source_prefix channel =
     ; "{"
     ; "    // Send message, encrypted if we have a key"
     ; "    copy32(msg, src);"
-    ; "    xor32(msg, ctx->derived_keys + 32);"
+    ; "    xor32(msg, ctx->keys + 64);"
     ; "    // Record sent message"
     ; "    copy32(ctx->transcript + ctx->transcript_size, msg);"
     ; "    ctx->transcript_size += 32;"
@@ -373,16 +377,16 @@ let print_source_prefix channel =
     ; "    ctx->transcript_size += 32;"
     ; "    // Receive message, decrypted it if we have a key"
     ; "    copy32(dest, msg);"
-    ; "    xor32(dest, ctx->derived_keys + 32);"
+    ; "    xor32(dest, ctx->keys + 64);"
     ; "}"
     ; ""
-    ; "// Could be a function, but it would prevent the compiler from"
-    ; "// noticing when id exceeds 32 bytes."
-    ; "#define KEX_INIT(ctx, id)                 \\"
-    ; "    static const uint8_t ck0[32] = id;    \\"
-    ; "    copy32(ctx->chaining_key, ck0);       \\"
-    ; "    copy32(ctx->derived_keys + 32, zero); \\"
-    ; "    ctx->transcript_size = 0"
+    ; "void kex_init(" ^ prefix ^ "ctx *ctx, const uint8_t pid[16])"
+    ; "{"
+    ; "    copy32(ctx->keys     , zero); // first chaining key"
+    ; "    copy32(ctx->keys + 64, zero); // first encryption key"
+    ; "    copy16(ctx->pid      , pid);  // protocol id"
+    ; "    ctx->transcript_size = 0;     // transcript starts empty"
+    ; "}"
     ; ""
     ; "static void kex_seed(" ^ prefix ^ "ctx *ctx, uint8_t random_seed[32])"
     ; "{"
@@ -426,6 +430,9 @@ let print_source_pattern channel pattern protocol =
   let lower_pattern = String.lowercase_ascii pattern in
   print_lines channel
     [ block_comment pattern
+    ; "static const uint8_t pid_" ^ lower_pattern
+      ^ "[16] = \"Monokex "       ^ pattern ^ "\";"
+    ; ""
     ; init_source pattern Client protocol
     ; init_source pattern Server protocol
     ];
