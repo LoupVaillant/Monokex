@@ -1,27 +1,4 @@
 open Utils
-
-let rec mapi i f = function
-  | x::l -> f i x :: mapi (i+1) f l
-  | _    -> []
-let rec zip_with f l1 l2 = match l1, l2 with
-  | x::l1, y::l2 -> f x y :: zip_with f l1 l2
-  | _            -> []
-let zip l1 l2 = zip_with pair l1 l2
-let rec map3 f l1 l2 l3 = match l1, l2, l3 with
-  | x::l1, y::l2, z::l3 -> f x y z :: map3 f l1 l2 l3
-  | _                   -> []
-let rec sums acc = function
-  | []      -> []
-  | x :: xs -> let sum = acc + x in
-               sum :: sums sum xs
-let rec remove_last = function
-  | []    -> error "remove_last"
-  | [_]   -> []
-  | x::xs -> x :: remove_last xs
-let pad_right strings =
-  let width = List.fold_left (fun w s -> max w (String.length s)) 0 strings in
-  strings /@ (fun s -> s ^ String.make (width - String.length s) ' ')
-
 module P = Proto
 
 (* Convert protocol to specs *)
@@ -55,48 +32,21 @@ let secrets p =
       | (P.E, P.E) -> "- __ee__ = X25519(ie, RE) = X25519(re, IE)\n")
   |> String.concat ""
 
-let chaining_keys : P.protocol -> string = fun p ->
-  let exchanges = P.all_exchanges p                                       in
-  let e         = exchanges /@ string_of_exchange                         in
-  let ck        = exchanges |> mapi 1 (fun i _ -> "CK" ^ string_of_int i) in
-  let ck0       = "       " :: (ck  /@  ((^) "XOR " ))                    in
-  map3 (fun ck ck0 e -> "- __"                       ^ ck
-                        ^ ":__ HChacha20(HChacha20(" ^ e
-                        ^ ", zero) "                 ^ ck0
-                        ^ ", pid)\n")
-    ck ck0 e
-  |> String.concat ""
-
-let auth_numbers : P.protocol -> int list = fun p ->
-  snd p
-  |> List.map    P.to_actions
-  |> List.map    (fun m -> m // P.is_exchange |> List.length)
-  |> List.filter ((<>) 0)
-  |> sums 0
-
-let auth_keys : P.protocol -> string = fun p ->
-  auth_numbers p
-  |> List.map (fun i -> let s = string_of_int i in
-                        "- __AK"^ s ^":__ Chacha20(CK"^ s ^", one)[ 0:31]\n")
-  |> String.concat ""
-
-let encryption_keys : P.protocol -> string = fun p ->
-  let actions   = (snd p) /@ P.to_actions |> List.concat in
-  let shifted   = List.tl actions @ [P.Key P.S]          in
-  zip actions shifted
-  // (fst |- P.is_exchange)
-  |> mapi 1 (fun i -> function
-         | _, P.Exchange _ -> ""
-         | _, P.Key      _ ->
-            let s = string_of_int i in
-            "- __EK" ^ s ^ ":__ Chacha20(CK" ^ s ^ ", one)[32:63]\n")
-  |> String.concat ""
-
-let payload_keys : P.protocol -> string = fun p ->
-  auth_numbers p
-  |> remove_last
-  |> List.map (fun i -> let s = string_of_int i in
-                        "- __PK"^ s ^":__ Chacha20(CK"^ s ^", two)[ 0:31]\n")
+let all_keys : P.protocol -> string = fun p ->
+  let exchanges = Proto.all_exchanges p /@ string_of_exchange in
+  let currents  = range 1 (List.length exchanges)             in
+  map2 (fun e c -> let current  = string_of_int c       in
+                   let previous = string_of_int (c - 1) in
+                   "- __CK"       ^ current
+                   ^ ", AK"       ^ current
+                   ^ ", EK"       ^ current
+                   ^ ", PK"       ^ current
+                   ^ ":__ XCKDF(" ^ e
+                   ^ ", "         ^ (if c = 1
+                                     then "zero"
+                                     else "CK" ^ previous ^ " ")
+                   ^ ", pid)\n"
+    ) exchanges currents
   |> String.concat ""
 
 let encrypted_keys : P.protocol -> string = fun p ->
@@ -200,19 +150,56 @@ let handshake : P.protocol -> string = fun p ->
   (P.cs_protocol p
    |> snd
    |> messages "initiator" "respondent" 1 0)
-  ^ "- The protocol is complete.  The session key is EK"
+  ^ "- The protocol is complete.  The session key is PK"
   ^ (P.all_exchanges p
      |> List.length
      |> string_of_int)
   ^ ".\n"
 
-let title t = t ^ "\n" ^ String.make (String.length t) '=' ^ "\n"
+let print_xckdf : out_channel -> unit =
+  fun channel ->
+  let ps s = output_string channel s in
+  let pe s = ps s; ps "\n"           in
+  pe "XCKDF";
+  pe "=====";
+  pe "";
+  pe "This is a Chacha20 based key derivation for X25519 shared secrets.";
+  pe "";
+  pe "The inputs are:";
+  pe "";
+  pe "- __DH:__   X25519 key exchange        (32 bytes)";
+  pe "- __IK:__   Input key material         (32 bytes)";
+  pe "- __salt:__ Protocol specific constant (16 bytes)";
+  pe "";
+  pe "The output of __XCKDF(DH, IK, salt)__ is a 128 byte buffer, defined as";
+  pe "follows:";
+  pe "";
+  pe "- __H:__   HChacha20(DH, zero)";
+  pe "- __X:__   H XOR prev";
+  pe "- __I:__   HChacha20(X, salt)";
+  pe "- __out:__ Chacha20(I, one)[0:127]";
+  pe "";
+  pe "_(\"[x:y]\" denotes a range; one is encoded in little endian.)_";
+  pe "";
+  pe "That output is divided among four 32-byte keys:";
+  pe "";
+  pe "- __K1:__ out[0 : 31]";
+  pe "- __K2:__ out[32: 63]";
+  pe "- __K3:__ out[64: 95]";
+  pe "- __K4:__ out[96:127]";
+  pe "";
+  pe "We note: __K1, K2, K3, K4 = XCKDF(DH, IK, salt)__";
+  pe "";
+  pe "";
+  ()
 
 let print : out_channel -> string -> P.protocol -> unit =
   fun channel pattern p ->
-  output_string  channel (title pattern);
-  let ps s = output_string channel s in
-  let pe s = ps s; ps "\n"           in
+  let ps s  = output_string channel s in
+  let pe s  = ps s; ps "\n"           in
+  pe pattern;
+  pe (String.make (max 3 (String.length pattern)) '=');
+  pe "";
   pe "Sender and recipient have the following X25519 key pairs (private half";
   pe "in lower case, public half in upper case):";
   pe "";
@@ -225,12 +212,9 @@ let print : out_channel -> string -> P.protocol -> unit =
   pe "Those shared secrets are hashed to derive the following keys:";
   pe "";
   pe ("- __pid:__ \"Monokex " ^ pattern ^ "\"  (ASCII, 16 bytes, zero padded)");
-  ps (chaining_keys   p);
-  ps (auth_keys       p);
-  ps (encryption_keys p);
-  ps (payload_keys    p);
+  ps (all_keys          p);
   pe "";
-  pe "_(\"[x:y]\" denotes a range; one and two are encoded in little endian.)_";
+  pe "_(The constant \"one\" is encoded in little endian.)_";
   pe "";
   pe "The messages contain the following (`||` denotes concatenation):";
   pe "";

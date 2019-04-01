@@ -24,6 +24,7 @@ let _ =
 
   List.iter validate protocols;
 
+  Gen_spec.print_xckdf spec;
   iter_pair (Gen_spec.print spec) protocols;
 
   Gen_code.print_header_prefix header;

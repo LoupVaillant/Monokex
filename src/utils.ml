@@ -13,10 +13,29 @@ let error   e         = raise (Invalid_argument e)
 let f_error e         = fun _ -> error e
 let check assertion e = if not assertion then error e
 
+(* List handling *)
 let last l = List.hd (List.rev l)
 let init l = List.tl (List.rev l)
+let rec range a b =
+  if      a > b then []
+  else if a = b then [a]
+  else               a :: range (a + 1) b
+let rec mapi i f = function
+  | x::l -> f i x :: mapi (i+1) f l
+  | _    -> []
+let rec zip_with f l1 l2 = match l1, l2 with
+  | x::l1, y::l2 -> f x y :: zip_with f l1 l2
+  | _            -> []
+let zip l1 l2 = zip_with pair l1 l2
+let rec map2 f l1 l2 = match l1, l2 with
+  | x::l1, y::l2-> f x y  :: map2 f l1 l2
+  | _           -> []
 
 (* Pretty printing functions *)
+let pad_right strings =
+  let width = List.fold_left (fun w s -> max w (String.length s)) 0 strings in
+  strings /@ (fun s -> s ^ String.make (width - String.length s) ' ')
+
 let grid =
   let rec transpose : ('a list list -> 'a option list list) =
     let is_some     = function Some _ -> true | None    -> false  in
