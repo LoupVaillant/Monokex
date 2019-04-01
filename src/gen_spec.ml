@@ -214,8 +214,6 @@ let print : out_channel -> string -> P.protocol -> unit =
   pe ("- __pid:__ \"Monokex " ^ pattern ^ "\"  (ASCII, 16 bytes, zero padded)");
   ps (all_keys          p);
   pe "";
-  pe "_(The constant \"one\" is encoded in little endian.)_";
-  pe "";
   pe "The messages contain the following (`||` denotes concatenation):";
   pe "";
   ps (encrypted_keys p);
