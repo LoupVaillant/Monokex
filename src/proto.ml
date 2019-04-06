@@ -49,8 +49,8 @@ let to_cs_exchange = map_cs_action (f_error "to_exchange") id
 
 let get_keys            message  = message  // is_key         /@ to_key
 let get_exchanges       message  = message  // is_exchange    /@ to_exchange
-let get_cs_key          message  = message  // is_cs_key      /@ to_cs_key
-let get_cs_exchange     message  = message  // is_cs_exchange /@ to_cs_exchange
+let get_cs_keys         message  = message  // is_cs_key      /@ to_cs_key
+let get_cs_exchanges    message  = message  // is_cs_exchange /@ to_cs_exchange
 let get_client_messages messages = messages // is_client      /@ to_actions
 let get_server_messages messages = messages // is_server      /@ to_actions
 
