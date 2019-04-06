@@ -14,7 +14,7 @@ CMO = $(patsubst %.ml, %.cmo, $(SRC))
 
 .PHONY: all clean repl
 
-all: gen
+all: gen src/repl.out
 repl: src/repl.out
 clean:
 	rm -f src/*.cmi src/*.cmo
