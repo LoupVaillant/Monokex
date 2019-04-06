@@ -26,15 +26,16 @@ gen: gen.out protocols.txt
 	mkdir -p gen
 	./gen.out gen < protocols.txt
 
-gen.out: src/main.ml $(SRC)
-	ocamlc $(OFLAGS) $(MLI) -c
-	ocamlc $(OFLAGS) $(SRC) -c
-	ocamlc $(OFLAGS) $(CMO) $< -o $@
+gen.out: src/main.ml $(CMO)
+	ocamlc $(OFLAGS) str.cma  $(CMO) $< -o $@
 
-src/repl.out: $(SRC)
-	ocamlc     $(OFLAGS) $(MLI) -c
-	ocamlc     $(OFLAGS) $(SRC) -c
-	ocamlmktop $(OFLAGS) $(CMO) -o $@
+src/repl.out: $(CMO) $(CMI)
+	ocamlmktop $(OFLAGS) str.cma $(CMO) -o $@
+
+%.cmi : %.mli
+	ocamlc $< $(OFLAGS) -c
+%.cmo : %.ml $(CMI)
+	ocamlc $< $(OFLAGS) -c
 
 src/scan.ml: src/scan.mll
 	ocamllex $< -o $@
