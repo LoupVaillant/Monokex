@@ -36,9 +36,5 @@ rule next_token =
   | _ as c  {(p lexbuf, Scan_error c               )}
 
 {
-  let tokens lexbuf =
-    Stream.from (fun _ -> let (pos, token) = next_token lexbuf in
-                          match token with
-                          | Eof -> None
-                          | t   -> Some (pos, t))
+  let tokens lexbuf = Stream.from (fun _ -> Some (next_token lexbuf))
 }

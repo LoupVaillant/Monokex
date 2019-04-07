@@ -3,7 +3,7 @@ open Scan
 
 type 'a psr = (int * token) Stream.t -> 'a
 
-let current_line : (int * token) Stream.t -> string = fun str ->
+let current_line : string psr = fun str ->
   match Stream.peek str with
   | None           -> "end of input"
   | Some (line, _) -> "line " ^ string_of_int line
@@ -76,3 +76,4 @@ let protocol       = (fun pre -> function
                      <*> (token Dots *> (many any_message)
                           <|> pure [])
 let protocols      = many (pair <$> protocol_name <*> protocol)
+                     <* (token Scan.Eof <?> "end of input")
