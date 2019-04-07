@@ -111,6 +111,45 @@ let pre_shared : P.protocol -> string = fun p ->
   | [k1; k2] -> "Note that " ^ k1 ^ " and " ^ k2 ^ " are shared in advance.\n"
   | _        -> error "pre_shared"
 
+let amplified_messages p =
+  let requests = range 1 (List.length (snd p))
+                 // is_odd
+                 // (fun msg -> msg < List.length (snd p)
+                                && Proto.first_client_auth p > msg
+                                && (Proto.first_server_auth p <= msg + 1
+                                    || Proto.nth_message_size p msg <
+                                         Proto.nth_message_size p (msg+1))) in
+  let to_str m = "msg" ^ string_of_int m                                    in
+  let warnings = requests /@
+                   (fun msg -> "the network packet containing " ^ to_str msg
+                               ^ " should be as big as the network packet "
+                               ^ "containing " ^ to_str (msg+1)
+                               ^ (if Proto.first_server_payload p > (msg + 1)
+                                  then ""
+                                  else " (and its payload, if any)"))       in
+  let messages = String.concat " and " (requests /@ to_str)                 in
+  match warnings with
+  | [] -> "" (* No amplified message at all *)
+  | l  -> "To avoid network amplification attacks: "
+          ^ String.concat "; " l
+          ^ ". Pad " ^ messages ^ " with zeroes as necessary\n"
+          |> paragraph
+
+let rec first_client_payload =
+  let uses_ephemeral msg = List.exists
+                             (fst |- (=) Proto.E)
+                             (Proto.get_cs_exchanges msg) in
+  function
+  | []               -> 1
+  | msg :: []        -> if uses_ephemeral msg then 1 else 2
+  | msg :: _ :: msgs -> if uses_ephemeral msg then 1 else
+                          2 + first_client_payload msgs
+
+let first_server_payload = function
+  | []        -> 1
+  | _ :: msgs -> first_client_payload msgs
+
+
 let handshake : P.protocol -> string = fun p ->
   let send sender receiver msg_num =
     "- The "          ^ sender
@@ -133,12 +172,12 @@ let handshake : P.protocol -> string = fun p ->
     "- The "          ^ receiver
     ^ " checks the "  ^ sender
     ^ "'s static key, and aborts if it fails.\n" in
-  let rec messages sender receiver msg_num ex = function
+  let rec messages sender receiver sender_p receiver_p msg_num ex = function
     | []      -> ""
     | m :: ms -> let nex    = ex + (m // P.is_cs_exchange |> List.length) in
                  let did_ex = nex > 0                                     in
                  send sender receiver msg_num
-                 ^ (if did_ex && ms <> []
+                 ^ (if msg_num >= sender_p
                     then payload sender receiver nex
                     else "")
                  ^ receive did_ex receiver msg_num
@@ -146,10 +185,16 @@ let handshake : P.protocol -> string = fun p ->
                                                    P.CS_key P.RS]) m
                     then transmit sender receiver
                     else "")
-                 ^ messages receiver sender (msg_num + 1) nex ms in
-  (P.cs_protocol p
-   |> snd
-   |> messages "initiator" "respondent" 1 0)
+                 ^ messages
+                     receiver sender
+                     receiver_p sender_p
+                     (msg_num + 1) nex ms        in
+  let msgs = snd (P.cs_protocol p)               in
+  (messages
+     "initiator" "respondent"
+     (first_client_payload msgs)
+     (first_server_payload msgs)
+     1 0 msgs)
   ^ "- The protocol is complete.  The session key is PK"
   ^ (P.all_exchanges p
      |> List.length
@@ -220,6 +265,9 @@ let print : out_channel -> string -> P.protocol -> unit =
   ps (messages p);
   pe "";
   ps (pre_shared p);
+  pe "";
+  ps (amplified_messages p);
+  pe "";
   pe "The handshake proceeds as follows:";
   pe "";
   ps (handshake p);
