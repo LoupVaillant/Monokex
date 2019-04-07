@@ -81,3 +81,37 @@ let all_exchanges p =
 
 let client_keys p = to_messages p |>get_client_messages |>List.concat |>get_keys
 let server_keys p = to_messages p |>get_server_messages |>List.concat |>get_keys
+
+
+(* By the numbers *)
+let rec first_like f = function
+  | []     -> 1
+  | x :: l -> if f x then 1 else 1 + first_like f l
+
+let fst_exch_like f p = first_like
+                          (List.exists f)
+                          (snd p /@ to_actions /@ get_exchanges)
+
+let first_exchange = fst_exch_like (const true)
+let first_es       = fst_exch_like ((=) (E, S))
+let first_se       = fst_exch_like ((=) (S, E))
+let first_ee       = fst_exch_like ((=) (E, E))
+let first_ss       = fst_exch_like ((=) (S, S))
+
+let to_odd  n = if is_odd  n then n else n + 1
+let to_even n = if is_even n then n else n + 1
+
+let first_client_payload = fst_exch_like (fun (e, _) -> e = E) |- to_odd
+let first_server_payload = fst_exch_like (fun (_, e) -> e = E) |- to_even
+let first_client_auth    = first_se |- to_odd
+let first_server_auth    = first_es |- to_even
+
+let nth_message      p n = let messages = snd p in
+                           if n > List.length messages || n <= 0
+                           then error "nth_message"
+                           else List.nth messages (n - 1)
+let nth_cs_message   p n = cs_message (nth_message p n)
+let nth_message_size p n =
+  let nb_keys = List.length (get_keys (to_actions(nth_message p n)))  in
+  let nb_tags = if first_exchange p <= n then 16 else 0               in
+  nb_keys * 32 + nb_tags

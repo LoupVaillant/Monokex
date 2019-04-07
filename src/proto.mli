@@ -49,3 +49,19 @@ val all_exchanges: protocol -> exchange list
 
 val client_keys  : protocol -> key list
 val server_keys  : protocol -> key list
+
+(* By the numbers *)
+val first_exchange : protocol -> int
+val first_es       : protocol -> int
+val first_se       : protocol -> int
+val first_ee       : protocol -> int
+val first_ss       : protocol -> int
+
+val first_client_payload : protocol -> int
+val first_server_payload : protocol -> int
+val first_client_auth    : protocol -> int
+val first_server_auth    : protocol -> int
+
+val nth_message      : protocol -> int -> message
+val nth_cs_message   : protocol -> int -> cs_message
+val nth_message_size : protocol -> int -> int

@@ -3,16 +3,6 @@ module P = Proto
 
 let prefix = "monokex_"
 
-let keys         message = message  // P.is_key      /@ P.to_key
-let exchanges    message = message  // P.is_exchange /@ P.to_exchange
-let has_exchange message = message |> P.to_actions |> exchanges |> (<>) []
-
-let rec first_auth = function
-  | []        -> error "first_auth: protocol makes no key exchange"
-  | msg::msgs -> if has_exchange msg
-                 then 1
-                 else 1 + first_auth msgs
-
 type cs = Client | Server
 type lr = Local  | Remote
 
@@ -101,29 +91,19 @@ let sends nb (messages : Proto.message list) =
   check (nb >= 0) "sends";
   nb <= List.length messages
 
-let verifies nb messages = first_auth messages <  nb
-let auths    nb messages = first_auth messages <= nb
+let verifies nb protocol = Proto.first_exchange protocol <  nb
+let auths    nb protocol = Proto.first_exchange protocol <= nb
 
 let r_actions nb messages = if not (receives nb) then []
                             else P.to_actions (List.nth messages (nb - 2))
 let s_actions nb messages = if not (sends nb messages) then []
                             else P.to_actions (List.nth messages (nb - 1))
 
-let r_size nb messages =
-  check (receives nb) "r_size";
-  let acts   = r_actions nb messages                  in
-  let t_size = if verifies nb messages then 16 else 0 in
-  let k_size = List.length (keys acts) * 32           in
-  k_size + t_size
+let r_size nb protocol = Proto.nth_message_size protocol (nb - 1)
+let s_size nb protocol = Proto.nth_message_size protocol nb
 
-let s_size nb messages =
-  check (sends nb messages) "s_size";
-  let acts   = s_actions nb messages               in
-  let t_size = if auths nb messages then 16 else 0 in
-  let k_size = List.length (keys acts) * 32        in
-  k_size + t_size
-
-let message_proto pattern nb messages =
+let message_proto pattern nb protocol =
+  let messages    = snd protocol                                         in
   let cs          = if nb mod 2 = 1 then Client else Server              in
   let gets_remote = List.mem (Proto.Key Proto.S) (r_actions nb messages) in
   let session_key = nb >= List.length messages                           in
@@ -133,17 +113,17 @@ let message_proto pattern nb messages =
   let sk          = ["uint8_t " ; "" ; "session_key"    ; "[32]"]        in
   let rk          = ["uint8_t " ; "" ; remote cs ^ "_pk"; "[32]"]        in
   prototype
-    (if verifies nb messages then "int" else "void")
+    (if verifies nb protocol then "int" else "void")
     (prefix ^ pattern ^ "_" ^ current)
     [ ctx
     ; if session_key then sk else []
     ; if gets_remote then rk else []
     ; if sends nb messages then
-        let ss = string_of_int (s_size nb messages) in
+        let ss = string_of_int (s_size nb protocol) in
         ["uint8_t "      ; ""; "msg" ^ current;  "[" ^ ss ^ "]"]
       else []
     ; if receives nb then
-        let ss = string_of_int (r_size nb messages) in
+        let ss = string_of_int (r_size nb protocol) in
         ["const uint8_t "; ""; "msg" ^ previous; "[" ^ ss ^ "]"]
       else []
     ]
@@ -223,7 +203,8 @@ let process_message process_key cs message_number message =
 let receive_message = process_message receive_key
 let send_message    = process_message send_key
 
-let message_body nb messages =
+let message_body nb protocol =
+  let messages    = snd protocol                                         in
   let cs          = if nb mod 2 == 1 then Client else Server             in
   let session_key = nb >= List.length messages                           in
   let gets_remote = List.mem (Proto.Key Proto.S) (r_actions nb messages) in
@@ -232,9 +213,9 @@ let message_body nb messages =
   ^ (if receives nb
      then
        let message = List.nth messages (nb - 2) |> P.to_actions in
-       let nb_keys = List.length (keys message)                 in
+       let nb_keys = List.length (Proto.get_keys message)       in
        receive_message cs (nb - 1) message
-       ^ (if verifies nb messages
+       ^ (if verifies nb protocol
           then verify (nb - 1) nb_keys
           else "")
      else ""
@@ -242,9 +223,9 @@ let message_body nb messages =
   ^ (if sends nb messages
      then
        let message = List.nth messages (nb - 1) |> P.to_actions in
-       let nb_keys = List.length (keys message)                 in
+       let nb_keys = List.length (Proto.get_keys message)       in
        send_message cs nb message
-       ^ (if auths nb messages
+       ^ (if auths nb protocol
           then auth nb nb_keys
           else "")
      else ""
@@ -256,17 +237,17 @@ let message_body nb messages =
      then "    copy32(session_key, ctx->keys + 96);\n"
           ^ "    WIPE_CTX(ctx);\n"
      else "";)
-  ^ (if verifies nb messages
+  ^ (if verifies nb protocol
      then "    return 0;\n"
      else "")
   ^ "}\n"
 
-let message_header pattern nb messages =
-  message_proto pattern nb messages ^ ";\n"
+let message_header pattern nb protocol =
+  message_proto pattern nb protocol ^ ";\n"
 
-let message_source pattern nb messages =
-  message_proto pattern nb messages
-  ^ message_body nb messages
+let message_source pattern nb protocol =
+  message_proto pattern nb protocol
+  ^ message_body nb protocol
 
 let print_lines channel lines =
   List.iter (fun line -> output_string channel (line ^ "\n")) lines
@@ -423,7 +404,7 @@ let print_header_pattern channel pattern protocol =
   let messages    = snd protocol         in
   let nb_messages = List.length messages in
   for i = 1 to nb_messages + 1 do
-    output_string channel (message_header lower_pattern i messages ^ "\n")
+    output_string channel (message_header lower_pattern i protocol ^ "\n")
   done
 
 let print_source_pattern channel pattern protocol =
@@ -439,5 +420,5 @@ let print_source_pattern channel pattern protocol =
   let messages    = snd protocol         in
   let nb_messages = List.length messages in
   for i = 1 to nb_messages + 1 do
-    output_string channel (message_source lower_pattern i messages ^ "\n")
+    output_string channel (message_source lower_pattern i protocol ^ "\n")
   done
