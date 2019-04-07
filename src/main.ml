@@ -3,12 +3,14 @@ let iter_pair f l =
   let l1, l2 = List.split l in
   List.iter2 f l1 l2
 
+let panic error =
+  prerr_endline error;
+  exit 1
+
 let validate (name, p) =
   match Validate.v p with
   | Validate.Valid        -> ()
-  | Validate.Broken error -> prerr_endline ("Bad protocol: " ^ name
-                                            ^ ": "           ^ error);
-                             exit 1
+  | Validate.Broken error -> panic ("Bad protocol: " ^ name ^ ": " ^ error)
 
 let parse channel =
   Lexing.from_channel channel
@@ -21,6 +23,8 @@ let _ =
   let header    = open_out (folder ^ "/monokex.h") in
   let source    = open_out (folder ^ "/monokex.c") in
   let protocols = parse stdin                      in
+
+  if protocols = [] then panic "There is no protocol to generate!";
 
   List.iter validate protocols;
 
