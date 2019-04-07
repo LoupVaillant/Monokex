@@ -13,6 +13,9 @@ val error   : string -> 'a
 val f_error : string -> 'a -> 'b
 val check   : bool -> string -> unit
 
+val is_even : int -> bool
+val is_odd  : int -> bool
+
 (* List handling *)
 val last     : 'a list -> 'a
 val init     : 'a list -> 'a list
@@ -26,3 +29,4 @@ val map2     : ('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list
 val pad_right : string list      -> string list
 val grid      : string list list -> string list
 val prototype : string -> string -> string list list -> string
+val paragraph : string -> string

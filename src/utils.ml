@@ -13,6 +13,9 @@ let error   e         = raise (Invalid_argument e)
 let f_error e         = fun _ -> error e
 let check assertion e = if not assertion then error e
 
+let is_even n = n mod 2 =  0
+let is_odd  n = n mod 2 <> 0
+
 (* List handling *)
 let last l = List.hd (List.rev l)
 let init l = List.tl (List.rev l)
@@ -69,3 +72,27 @@ let prototype return_type function_name args =
     | x :: xs -> ((return_type ^ " " ^ function_name ^ "(") :: x)
                  :: xs /@ cons ""                       in
   String.concat ",\n" (grid indent) ^ ")"
+
+let paragraph =
+  let rec take_line n = function
+    | []     -> []
+    | x :: l -> let line_length = n + 1 + String.length x in
+                if line_length > 72
+                then []
+                else x :: take_line line_length l in
+  let rec drop_line n = function
+    | []     -> []
+    | x :: l -> let line_length = n + 1 + String.length x in
+                if line_length > 72
+                then x :: l
+                else drop_line line_length l      in
+  let rec lines words =
+    match take_line 0 words with
+    | []   -> []
+    | line -> line :: lines (drop_line 0 words)   in
+  fun str ->
+  str
+  |> Str.split (Str.regexp " +")
+  |> lines
+  |> List.map (String.concat " ")
+  |> String.concat "\n"
