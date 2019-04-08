@@ -2,18 +2,6 @@ open Utils
 module P = Proto
 
 (* Convert protocol to specs *)
-let string_of_key : P.cs_key -> string = function
-  | P.IS -> "IS"
-  | P.IE -> "IE"
-  | P.RS -> "RS"
-  | P.RE -> "RE"
-
-let string_of_exchange : P.exchange -> string = function
-  | (P.S, P.S) -> "ss"
-  | (P.S, P.E) -> "se"
-  | (P.E, P.S) -> "es"
-  | (P.E, P.E) -> "ee"
-
 let keys : P.protocol -> string = fun p ->
   let actions  = P.all_keys p                           in
   let kk k txt = if List.mem k actions then txt else "" in
@@ -33,7 +21,7 @@ let secrets p =
   |> String.concat ""
 
 let all_keys : P.protocol -> string = fun p ->
-  let exchanges = Proto.all_exchanges p /@ string_of_exchange in
+  let exchanges = Proto.all_exchanges p /@ P.string_of_exchange in
   let currents  = range 1 (List.length exchanges)             in
   map2 (fun e c -> let current  = string_of_int c       in
                    let previous = string_of_int (c - 1) in
@@ -56,8 +44,8 @@ let encrypted_keys : P.protocol -> string = fun p ->
                   // (fst |- P.is_cs_exchange)
                   |> mapi 1 (fun i -> function
                          | _, P.CS_exchange _ -> ""
-                         | _, P.CS_key      k -> let s = string_of_int i in
-                                                 let x = string_of_key k in
+                         | _, P.CS_key      k -> let s = string_of_int i   in
+                                                 let x = P.string_of_key k in
                                                  "    X" ^ x ^ "  = "
                                                  ^ x ^ " XOR EK" ^ s ^ "\n") in
   if keys = []
@@ -69,7 +57,7 @@ let messages : P.protocol -> string = fun p ->
     | []             -> []
     | P.CS_exchange e :: keys -> key (ex + 1) keys
     | P.CS_key      k :: keys -> let x = if ex > 0 then "X" else "" in
-                                 (x ^ string_of_key k) :: key ex keys         in
+                                 (x ^ P.string_of_key k) :: key ex keys       in
   let rec msg ex = function
     | []            -> []
     | m :: messages -> let nex = ex + (m // P.is_cs_exchange |> List.length) in
@@ -93,7 +81,7 @@ let messages : P.protocol -> string = fun p ->
            |> pad_right                                                       in
   let a  = P.cs_protocol p |> snd
            |> (auth 0 ((P.cs_protocol p |> fst |> List.concat)
-                       // P.is_cs_key /@ P.to_cs_key /@ string_of_key))       in
+                       // P.is_cs_key /@ P.to_cs_key /@ P.string_of_key))     in
   zip_with
     (fun m a -> "    "
                 ^ (if a = "" then String.trim m else m ^ a)
@@ -105,7 +93,7 @@ let pre_shared : P.protocol -> string = fun p ->
   match ((P.cs_protocol p |> fst |> List.concat)
          // P.is_cs_key
          /@ P.to_cs_key
-         /@ string_of_key) with
+         /@ P.string_of_key) with
   | []       -> ""
   | [k1]     -> "Note that " ^ k1 ^                 " is shared in advance.\n"
   | [k1; k2] -> "Note that " ^ k1 ^ " and " ^ k2 ^ " are shared in advance.\n"

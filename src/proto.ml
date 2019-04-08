@@ -15,6 +15,18 @@ type cs_action   = CS_key      of cs_key
 type cs_message  = cs_action list
 type cs_protocol = cs_message list * cs_message list
 
+let string_of_key = function
+  | IS -> "IS"
+  | IE -> "IE"
+  | RS -> "RS"
+  | RE -> "RE"
+
+let string_of_exchange = function
+  | (S, S) -> "ss"
+  | (S, E) -> "se"
+  | (E, S) -> "es"
+  | (E, E) -> "ee"
+
 let map_message c s = function
   | Client actions -> c actions
   | Server actions -> s actions

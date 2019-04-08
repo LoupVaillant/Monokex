@@ -13,6 +13,9 @@ type cs_action   = CS_key      of cs_key
 type cs_message  = cs_action list
 type cs_protocol = cs_message list * cs_message list
 
+val string_of_key      : cs_key   -> string
+val string_of_exchange : exchange -> string
+
 val map_message  : (action list -> 'a) -> (action list -> 'a) -> message   -> 'a
 val map_action   : (key         -> 'a) -> (exchange    -> 'a) -> action    -> 'a
 val map_cs_action: (cs_key      -> 'a) -> (exchange    -> 'a) -> cs_action -> 'a
