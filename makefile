@@ -32,7 +32,7 @@ gen.out: src/main.ml $(CMO)
 src/repl.out: $(CMO) $(CMI)
 	ocamlmktop $(OFLAGS) str.cma $(CMO) -o $@
 
-%.cmi : %.mli
+%.cmi : %.mli $(MLI)
 	ocamlc $< $(OFLAGS) -c
 %.cmo : %.ml $(CMI)
 	ocamlc $< $(OFLAGS) -c
