@@ -1,3 +1,5 @@
+open Utils
+
 (* Utils *)
 let iter_pair f l =
   let l1, l2 = List.split l in
@@ -7,10 +9,11 @@ let panic error =
   prerr_endline error;
   exit 1
 
-let validate (name, p) =
+let protocol_errors (name, p) =
   match Validate.v p with
-  | Validate.Valid        -> ()
-  | Validate.Broken error -> panic ("Bad protocol: " ^ name ^ ": " ^ error)
+  | []     -> []
+  | errors -> ["Bad protocol: " ^ name ^ ":\n"
+               ^ String.concat "" (errors /@ (fun e -> "- " ^ e ^ "\n"))]
 
 let parse channel =
   Lexing.from_channel channel
@@ -18,15 +21,15 @@ let parse channel =
   |> Parsec.protocols
 
 let _ =
-  let folder    = Sys.argv.(1) in
-  let spec      = open_out (folder ^ "/spec.md"  ) in
-  let header    = open_out (folder ^ "/monokex.h") in
-  let source    = open_out (folder ^ "/monokex.c") in
-  let protocols = parse stdin                      in
+  let folder    = Sys.argv.(1)                                in
+  let spec      = open_out (folder ^ "/spec.md"  )            in
+  let header    = open_out (folder ^ "/monokex.h")            in
+  let source    = open_out (folder ^ "/monokex.c")            in
+  let protocols = parse stdin                                 in
+  let errors    = protocols /@ protocol_errors |> List.concat in
 
   if protocols = [] then panic "There is no protocol to generate!";
-
-  List.iter validate protocols;
+  if errors   <> [] then panic ("\n" ^ String.concat "\n" errors ^ "\n");
 
   Gen_spec.print_xckdf spec;
   iter_pair (Gen_spec.print spec) protocols;

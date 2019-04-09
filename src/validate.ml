@@ -1,137 +1,132 @@
-open Proto
+open Utils
+module P = Proto
 
-type shared = { client_s: bool
-              ; client_e: bool
-              ; server_s: bool
-              ; server_e: bool }
-type state  = { shared     : shared
-              ; exchanges  : exchange list
-              ; last_action: action }
+(* Utilities *)
+let rec duplicates = function
+  | []     -> []
+  | x :: l -> if List.mem x l
+              then x :: duplicates (l // (<>) x)
+              else duplicates l
 
-exception Error of string
-let error      e = raise (Error e)
-let error_if b e = if b then error e
+let rec remove_duplicates = function
+  | []     -> []
+  | x :: l -> let no_dups = remove_duplicates l in
+              if List.mem x no_dups
+              then no_dups
+              else x :: no_dups
 
-let u_exchange    ex st = { st with exchanges   = ex }
-let u_last_action  a st = { st with last_action = a  }
-let u_shared      sh st = { st with shared      = sh }
+let rec take_until f = function
+  | []     -> []
+  | x :: l -> if f x then x :: take_until f l else []
 
-let a_exchange ex = fun st -> u_exchange (ex :: st.exchanges) st
-let a_client_s st = u_shared {st.shared with client_s = true} st
-let a_client_e st = u_shared {st.shared with client_e = true} st
-let a_server_s st = u_shared {st.shared with server_s = true} st
-let a_server_e st = u_shared {st.shared with server_e = true} st
+let rec drop_until f = function
+  | []     -> []
+  | x :: l -> if f x then l else drop_until f l
 
-let add_exchange ex st = st |> a_exchange ex |> u_last_action (Exchange ex)
-let add_client_s    st = st |> a_client_s    |> u_last_action (Key S      )
-let add_client_e    st = st |> a_client_e    |> u_last_action (Key E      )
-let add_server_s    st = st |> a_server_s    |> u_last_action (Key S      )
-let add_server_e    st = st |> a_server_e    |> u_last_action (Key E      )
+let rec runs_of f = function
+  | [] -> []
+  | l  -> let next = drop_until (f |- not) l in
+          let run  = take_until f next       in
+          let rest = drop_until f next       in
+          run :: runs_of f rest
 
-let action_is_key = function
-  | Exchange _ -> false
-  | Key      _ -> true
+let pre_actions  p = List.concat (fst (P.cs_protocol p))
+let post_actions p = List.concat (snd (P.cs_protocol p))
+let all_actions  p = pre_actions p @ post_actions p
 
-let last_action_was_key st = action_is_key st.last_action
+(* Verifications *)
+let message_order p =
+  let rec aux = function
+    | []                        -> []
+    | [_]                       -> []
+    | P.Client _::P.Server s::l -> aux (P.Server s :: l)
+    | P.Server _::P.Client c::l -> aux (P.Client c :: l)
+    | P.Client _::P.Client _::l -> "Two initiator messages in a row."  :: aux l
+    | P.Server _::P.Server _::l -> "Two respondent messages in a row." :: aux l
+  in
+  match snd p with
+  | []              -> ["There is no message!"]
+  | P.Server _ :: l -> "First message come from the respondent." :: aux l
+  | l               -> aux l
 
-let last_action_was_encrypted_key st =
-  last_action_was_key st && st.exchanges <> []
+let pre_shared_ephemeral p =
+  let keys = P.get_cs_keys (pre_actions p) in
+  let is   = if List.mem P.IE keys then ["Pre-shared initiator ephemeral key."]
+             else []                       in
+  let rs   = if List.mem P.RE keys then ["Pre-shared respondent ephemeral key."]
+             else []                       in
+  is @ rs
 
-let check_can_send_key st = match st.last_action with
-  | Exchange _ -> ()
-  | Key      _ -> error_if (st.exchanges <> [])
-                    ("Unimplemented feature: "
-                     ^ "two encrypted keys in a row.  "
-                     ^ "Interleave an exchange first.\n"
-                     ^ "If you have a compelling use case for this, "
-                     ^ "file a bug.  We might add support for it later.")
+let pre_done_key_exchange p =
+  P.get_cs_exchanges (pre_actions p)
+  /@ P.string_of_exchange
+  /@ (fun e -> "Exchange " ^ e ^ " happens before protocol start.")
 
-let string_of_exchange : exchange -> string = function
-  | (S, S) -> "ss"
-  | (S, E) -> "se"
-  | (E, S) -> "es"
-  | (E, E) -> "ee"
+let impossible_exchanges p =
+  all_actions p
+  |> List.fold_left
+       (fun (keys, pairs) -> function
+         | P.CS_key      k -> ((k :: keys), pairs)
+         | P.CS_exchange e -> (keys, (keys, e) :: pairs))
+       ([], [])
+  |> snd
+  |> List.filter
+       (fun (keys, (ik, rk)) ->
+         let i = match ik with
+           | P.E -> List.mem P.IE keys
+           | P.S -> List.mem P.IS keys in
+         let r = match rk with
+           | P.E -> List.mem P.RE keys
+           | P.S -> List.mem P.RS keys in
+         not (i && r))
+  |> List.map snd
+  |> List.map (fun e -> "The exchange " ^ P.string_of_exchange e
+                        ^ " cannot be performed.")
 
-let can_exchange : exchange -> state -> bool = fun ex st ->
-  match ex with
-  | (S, S) -> st.shared.client_s && st.shared.server_s
-  | (S, E) -> st.shared.client_s && st.shared.server_e
-  | (E, S) -> st.shared.client_e && st.shared.server_s
-  | (E, E) -> st.shared.client_e && st.shared.server_e
+let duplicate_exchanges p =
+  duplicates (P.all_exchanges p)
+  /@ (fun x -> "The exchange " ^ P.string_of_exchange x
+               ^ " appears more than once.")
 
-let send : key -> state -> state = fun key st ->
-  check_can_send_key st;
-  match key with
-  | S -> error_if st.shared.client_s "Initiator static key is sent twice.";
-         add_client_s st
-  | E -> error_if st.shared.client_e "Initiator ephemeral key is sent twice.";
-         add_client_e st
+let duplicate_keys p =
+  duplicates (P.all_keys p)
+  /@ (fun x -> "The key " ^ P.string_of_key x ^ " appears more than once.")
 
-let reply : key -> state -> state = fun key st ->
-  check_can_send_key st;
-  match key with
-  | S -> error_if st.shared.server_s "Respondent static key is sent twice.";
-         add_server_s st
-  | E -> error_if st.shared.server_e "Respondent ephemeral key is sent twice.";
-         add_server_e st
+let two_keys_in_a_row p =
+  all_actions p
+  |> drop_until P.is_cs_exchange
+  |> runs_of    P.is_cs_key
+  |> List.filter (fun run -> List.length run > 1)
+  |> (function
+      |[] -> []
+      | _  -> [paragraph "Unimplemented feature: two encrypted keys in a row."])
 
-let exchange : exchange -> state -> state = fun ex st ->
-  error_if (List.mem ex st.exchanges) ("Exchange '" ^ string_of_exchange ex
-                                       ^ "' is performed twice.");
-  error_if (not (can_exchange ex st)) ("Exchange '" ^ string_of_exchange ex
-                                       ^ "' is impossible.");
-  add_exchange ex st
+let unused_key p =
+  let keys      = P.all_keys      p in
+  let exchanges = P.all_exchanges p in
+  keys // ((function
+            | P.IE -> List.exists (fun e -> fst e = P.E) exchanges
+            | P.IS -> List.exists (fun e -> fst e = P.S) exchanges
+            | P.RE -> List.exists (fun e -> snd e = P.E) exchanges
+            | P.RS -> List.exists (fun e -> snd e = P.S) exchanges)
+           |- not)
+  /@ P.string_of_key
+  /@ (fun k -> "Key " ^ k ^ " is unused.")
 
-let message : state -> message -> state = fun st message ->
-  let (send_or_reply, actions) = match message with
-    | Client actions -> (send , actions)
-    | Server actions -> (reply, actions) in
-  let act st = function
-    | Key      k -> send_or_reply k st
-    | Exchange e -> exchange      e st   in
-  List.fold_left act st actions
-
-let messages : message list -> state -> state = fun messages st ->
-  List.fold_left message st messages
-
-let check_alternation : message list -> unit =
-  let alternation msg1 msg2 = match (msg1, msg2) with
-    | Client _, Server m -> Server m
-    | Server _, Client m -> Client m
-    | _                  -> error ("Messages must alternate directions, " ^
-                                     "initiator first")
-  in fun messages ->
-     ignore (List.fold_left alternation (Server []) messages)
-
-let run_protocol : protocol -> unit = fun (pre, run) ->
-  let init = { shared      = { client_s = false
-                             ; client_e = false
-                             ; server_s = false
-                             ; server_e = false }
-             ; exchanges   = []
-             ; last_action = Exchange (E, E) } in (* dummy value *)
-  let st = messages pre init                   in
-  error_if (st.shared.client_e ||
-              st.shared.server_e)      "Pre-shared ephemeral key";
-  error_if (st.exchanges <> [])        "Key exchange performed in advance.";
-  error_if (run = [])                  "Protocol has no message!";
-  check_alternation run;
-  let final = messages run st                in
-  error_if (last_action_was_key final) "Protocol doesn't end by a key exchange."
-
-(* TODO: verify that every key is eventually used. Note that it would
-   mask the "must end by a key exchange" error.
-   TODO: decide what to do with respect to ephemeral keys:
+(* TODO: decide what to do with respect to ephemeral keys:
    - Must the initiator always send an ephemeral?
    - Must the respondent include an ephemeral in its replies?
    - More generally, does sending messages means we have to produce
      an ephemeral?
    - While we're at it, must the ephemeral be sent before anything else?
  *)
+let v p = remove_duplicates
+            (message_order           p
+             @ pre_shared_ephemeral  p
+             @ pre_done_key_exchange p
+             @ impossible_exchanges  p
+             @ duplicate_exchanges   p
+             @ duplicate_keys        p
+             @ two_keys_in_a_row     p
+             @ unused_key            p)
 
-type t = Valid
-       | Broken of string
-
-let v : protocol -> t = fun protocol ->
-  try run_protocol protocol; Valid with
-    Error e -> Broken e

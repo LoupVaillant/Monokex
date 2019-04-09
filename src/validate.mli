@@ -1,4 +1,1 @@
-type t = Valid
-       | Broken of string
-
-val v : Proto.protocol -> t
+val v : Proto.protocol -> string list
