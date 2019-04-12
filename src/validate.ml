@@ -30,6 +30,13 @@ let rec runs_of f = function
           let rest = drop_until f next       in
           run :: runs_of f rest
 
+let rec unconcat2 = function
+  | []          -> []
+  | [x]         -> [[x]]
+  | a :: b :: l -> [a; b] :: unconcat2 l
+let rec get_odds  l = unconcat2 l /@ List.hd
+let rec get_evens l = unconcat2 l /@ List.tl |> List.concat
+
 let pre_actions  p = List.concat (fst (P.cs_protocol p))
 let post_actions p = List.concat (snd (P.cs_protocol p))
 let all_actions  p = pre_actions p @ post_actions p
@@ -113,14 +120,36 @@ let unused_key p =
   /@ P.string_of_key
   /@ (fun k -> "Key " ^ k ^ " is unused.")
 
-(* TODO: decide what to do with respect to ephemeral keys:
-   - Must the initiator always send an ephemeral?
-   - Must the respondent include an ephemeral in its replies?
-   - More generally, does sending messages means we have to produce
-     an ephemeral?
-   - While we're at it, must the ephemeral be sent before anything else?
- *)
-let v p = remove_duplicates
+let must_use_ephemeral p =
+  let exchanges =
+    let rec aux acc = function
+      | []      -> [acc]
+      | m :: ms -> let new_acc = acc @ m in
+                   new_acc :: aux (new_acc) ms
+    in aux [] (snd p /@ P.to_actions /@ P.get_exchanges) in
+  let iss exchanges =
+    if List.mem (P.S, P.S) exchanges && not (List.mem (P.E, P.S) exchanges)
+    then ["Initiator sends payload with ss and without es."]
+    else []                                              in
+  let ise exchanges =
+    if List.mem (P.S, P.E) exchanges && not (List.mem (P.E, P.E) exchanges)
+    then ["Initiator sends payload with se and without ee."]
+    else []                                              in
+  let rss exchanges =
+    if List.mem (P.S, P.S) exchanges && not (List.mem (P.S, P.E) exchanges)
+    then ["Respondent sends payload with ss and without se."]
+    else []                                              in
+  let res exchanges =
+    if List.mem (P.E, P.S) exchanges && not (List.mem (P.E, P.E) exchanges)
+    then ["Respondent sends payload with es and without ee."]
+    else []                                              in
+  List.concat (get_odds    exchanges /@ iss
+               @ get_odds  exchanges /@ ise
+               @ get_evens exchanges /@ rss
+               @ get_evens exchanges /@ res)
+
+let v p =
+  let simple_errors =
             (message_order           p
              @ pre_shared_ephemeral  p
              @ pre_done_key_exchange p
@@ -128,5 +157,8 @@ let v p = remove_duplicates
              @ duplicate_exchanges   p
              @ duplicate_keys        p
              @ two_keys_in_a_row     p
-             @ unused_key            p)
-
+             @ unused_key            p)    in
+  let subtle_errors = must_use_ephemeral p in
+  remove_duplicates (if simple_errors = []
+                     then subtle_errors
+                     else simple_errors)
