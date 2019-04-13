@@ -91,8 +91,8 @@ let sends nb (messages : Proto.message list) =
   check (nb >= 0) "sends";
   nb <= List.length messages
 
-let verifies nb protocol = Proto.first_exchange protocol <  nb
-let auths    nb protocol = Proto.first_exchange protocol <= nb
+let verifies nb protocol = Proto.first_auth protocol <  nb
+let auths    nb protocol = Proto.first_auth protocol <= nb
 
 let r_actions nb messages = if not (receives nb) then []
                             else P.to_actions (List.nth messages (nb - 2))

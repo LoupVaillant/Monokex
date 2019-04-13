@@ -30,13 +30,6 @@ let rec runs_of f = function
           let rest = drop_until f next       in
           run :: runs_of f rest
 
-let rec unconcat2 = function
-  | []          -> []
-  | [x]         -> [[x]]
-  | a :: b :: l -> [a; b] :: unconcat2 l
-let rec get_odds  l = unconcat2 l /@ List.hd
-let rec get_evens l = unconcat2 l /@ List.tl |> List.concat
-
 let pre_actions  p = List.concat (fst (P.cs_protocol p))
 let post_actions p = List.concat (snd (P.cs_protocol p))
 let all_actions  p = pre_actions p @ post_actions p
@@ -121,32 +114,22 @@ let unused_key p =
   /@ (fun k -> "Key " ^ k ^ " is unused.")
 
 let must_use_ephemeral p =
-  let exchanges =
-    let rec aux acc = function
-      | []      -> [acc]
-      | m :: ms -> let new_acc = acc @ m in
-                   new_acc :: aux (new_acc) ms
-    in aux [] (snd p /@ P.to_actions /@ P.get_exchanges) in
-  let iss exchanges =
-    if List.mem (P.S, P.S) exchanges && not (List.mem (P.E, P.S) exchanges)
-    then ["Initiator sends payload with ss and without es."]
-    else []                                              in
-  let ise exchanges =
-    if List.mem (P.S, P.E) exchanges && not (List.mem (P.E, P.E) exchanges)
-    then ["Initiator sends payload with se and without ee."]
-    else []                                              in
-  let rss exchanges =
-    if List.mem (P.S, P.S) exchanges && not (List.mem (P.S, P.E) exchanges)
-    then ["Respondent sends payload with ss and without se."]
-    else []                                              in
-  let res exchanges =
-    if List.mem (P.E, P.S) exchanges && not (List.mem (P.E, P.E) exchanges)
-    then ["Respondent sends payload with es and without ee."]
-    else []                                              in
-  List.concat (get_odds    exchanges /@ iss
-               @ get_odds  exchanges /@ ise
-               @ get_evens exchanges /@ rss
-               @ get_evens exchanges /@ res)
+  let kci n used unused =
+    let sender = if is_odd n then "Initiator" else "Respondent" in
+    if P.uses_exchange p used n && not (P.uses_exchange p unused n)
+    then [sender ^ " sends payload with " ^ P.string_of_exchange used
+          ^ " and without "               ^ P.string_of_exchange unused ^ "."]
+    else []                                                      in
+  let iss n = kci n (P.S, P.S) (P.E, P.S)                        in
+  let ise n = kci n (P.S, P.E) (P.E, P.E)                        in
+  let rss n = kci n (P.S, P.S) (P.S, P.E)                        in
+  let res n = kci n (P.E, P.S) (P.E, P.E)                        in
+  let client_messages = range 1 (List.length (snd p)) // is_odd  in
+  let server_messages = range 1 (List.length (snd p)) // is_even in
+  List.concat (client_messages   /@ iss
+               @ client_messages /@ ise
+               @ server_messages /@ rss
+               @ server_messages /@ res)
 
 let v p =
   let simple_errors =

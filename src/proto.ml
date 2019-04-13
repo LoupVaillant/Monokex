@@ -103,20 +103,23 @@ let rec first_like f = function
 let fst_exch_like f p = first_like
                           (List.exists f)
                           (snd p /@ to_actions /@ get_exchanges)
+let fst_key_like f p = first_like
+                         (List.exists f)
+                         (snd p /@ cs_message /@ get_cs_keys)
 
-let first_exchange = fst_exch_like (const true)
-let first_es       = fst_exch_like ((=) (E, S))
-let first_se       = fst_exch_like ((=) (S, E))
-let first_ee       = fst_exch_like ((=) (E, E))
-let first_ss       = fst_exch_like ((=) (S, S))
+let first_auth     p     = fst_exch_like (const true) p
+let first_exchange p e   = fst_exch_like ((=) e) p
+let first_used_key p k   = fst_key_like  ((=) k) p
+let uses_exchange  p e n = first_exchange p e <= n
+let uses_key       p k n = first_used_key p k <= n
 
 let to_odd  n = if is_odd  n then n else n + 1
 let to_even n = if is_even n then n else n + 1
 
-let first_client_payload = fst_exch_like (fun (e, _) -> e = E) |- to_odd
-let first_server_payload = fst_exch_like (fun (_, e) -> e = E) |- to_even
-let first_client_auth    = first_se |- to_odd
-let first_server_auth    = first_es |- to_even
+let first_client_payload p = first_used_key p IE     |> to_odd
+let first_server_payload p = first_used_key p RE     |> to_even
+let first_client_auth    p = first_exchange p (S, E) |> to_odd
+let first_server_auth    p = first_exchange p (E, S) |> to_even
 
 let nth_message      p n = let messages = snd p in
                            if n > List.length messages || n <= 0
@@ -125,5 +128,5 @@ let nth_message      p n = let messages = snd p in
 let nth_cs_message   p n = cs_message (nth_message p n)
 let nth_message_size p n =
   let nb_keys = List.length (get_keys (to_actions(nth_message p n)))  in
-  let nb_tags = if first_exchange p <= n then 16 else 0               in
+  let nb_tags = if first_auth p <= n then 16 else 0                   in
   nb_keys * 32 + nb_tags

@@ -54,11 +54,12 @@ val client_keys  : protocol -> key list
 val server_keys  : protocol -> key list
 
 (* By the numbers *)
-val first_exchange : protocol -> int
-val first_es       : protocol -> int
-val first_se       : protocol -> int
-val first_ee       : protocol -> int
-val first_ss       : protocol -> int
+val first_auth     : protocol -> int
+val first_used_key : protocol -> cs_key -> int
+val first_exchange : protocol -> exchange -> int
+
+val uses_exchange : protocol -> exchange -> int -> bool
+val uses_key      : protocol -> cs_key   -> int -> bool
 
 val first_client_payload : protocol -> int
 val first_server_payload : protocol -> int
