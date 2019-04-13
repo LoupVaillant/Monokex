@@ -165,7 +165,7 @@ let handshake : P.protocol -> string = fun p ->
     | m :: ms -> let nex    = ex + (m // P.is_cs_exchange |> List.length) in
                  let did_ex = nex > 0                                     in
                  send sender receiver msg_num
-                 ^ (if msg_num >= sender_p
+                 ^ (if msg_num >= sender_p && ms <> []
                     then payload sender receiver nex
                     else "")
                  ^ receive did_ex receiver msg_num
