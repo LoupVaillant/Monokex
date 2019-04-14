@@ -118,8 +118,6 @@ let to_even n = if is_even n then n else n + 1
 
 let first_client_payload p = first_used_key p IE     |> to_odd
 let first_server_payload p = first_used_key p RE     |> to_even
-let first_client_auth    p = first_exchange p (S, E) |> to_odd
-let first_server_auth    p = first_exchange p (E, S) |> to_even
 
 let nb_messages      p   = List.length (snd p)
 let nth_message      p n = if  n <= 0 || n > nb_messages p
@@ -131,4 +129,8 @@ let nth_message_size p n =
   let nb_tags = if first_auth p <= n then 1 else 0                    in
   nb_keys*32 + nb_tags*16
 
-
+let is_amplified p n =
+  let is_client_amplified = is_odd  n && not (uses_key p RE n) in
+  let is_server_amplified = is_even n && not (uses_key p IE n) in
+  let is_not_last         = n < nb_messages p                  in
+  is_not_last && (is_client_amplified || is_server_amplified)

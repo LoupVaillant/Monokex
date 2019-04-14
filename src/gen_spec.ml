@@ -100,13 +100,7 @@ let pre_shared : P.protocol -> string = fun p ->
   | _        -> error "pre_shared"
 
 let amplified_messages p =
-  let requests = range 1 (P.nb_messages p)
-                 // is_odd
-                 // (fun msg -> msg < P.nb_messages p
-                                && Proto.first_client_auth p > msg
-                                && (Proto.first_server_auth p <= msg + 1
-                                    || Proto.nth_message_size p msg <
-                                         Proto.nth_message_size p (msg+1))) in
+  let requests = range 1 (P.nb_messages p) // P.is_amplified p              in
   let to_str m = "msg" ^ string_of_int m                                    in
   let warnings = requests /@
                    (fun msg -> "the network packet containing " ^ to_str msg
@@ -120,7 +114,7 @@ let amplified_messages p =
   | [] -> "" (* No amplified message at all *)
   | l  -> "To avoid network amplification attacks: "
           ^ String.concat "; " l
-          ^ ". Pad " ^ messages ^ " with zeroes as necessary\n"
+          ^ ". Pad " ^ messages ^ " with zeroes as necessary\n\n"
           |> paragraph
 
 let rec first_client_payload =
@@ -255,7 +249,6 @@ let print : out_channel -> string -> P.protocol -> unit =
   ps (pre_shared p);
   pe "";
   ps (amplified_messages p);
-  pe "";
   pe "The handshake proceeds as follows:";
   pe "";
   ps (handshake p);

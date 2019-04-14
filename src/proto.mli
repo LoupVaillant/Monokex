@@ -63,10 +63,10 @@ val uses_key      : protocol -> cs_key   -> int -> bool
 
 val first_client_payload : protocol -> int
 val first_server_payload : protocol -> int
-val first_client_auth    : protocol -> int
-val first_server_auth    : protocol -> int
 
 val nb_messages      : protocol -> int
 val nth_message      : protocol -> int -> message
 val nth_cs_message   : protocol -> int -> cs_message
 val nth_message_size : protocol -> int -> int
+
+val is_amplified : protocol -> int -> bool
