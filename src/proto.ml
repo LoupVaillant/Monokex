@@ -121,12 +121,14 @@ let first_server_payload p = first_used_key p RE     |> to_even
 let first_client_auth    p = first_exchange p (S, E) |> to_odd
 let first_server_auth    p = first_exchange p (E, S) |> to_even
 
-let nth_message      p n = let messages = snd p in
-                           if n > List.length messages || n <= 0
+let nb_messages      p   = List.length (snd p)
+let nth_message      p n = if  n <= 0 || n > nb_messages p
                            then error "nth_message"
-                           else List.nth messages (n - 1)
+                           else List.nth (snd p) (n - 1)
 let nth_cs_message   p n = cs_message (nth_message p n)
 let nth_message_size p n =
   let nb_keys = List.length (get_keys (to_actions(nth_message p n)))  in
-  let nb_tags = if first_auth p <= n then 16 else 0                   in
-  nb_keys * 32 + nb_tags
+  let nb_tags = if first_auth p <= n then 1 else 0                    in
+  nb_keys*32 + nb_tags*16
+
+

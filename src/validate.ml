@@ -119,13 +119,13 @@ let must_use_ephemeral p =
     if P.uses_exchange p used n && not (P.uses_exchange p unused n)
     then [sender ^ " sends payload with " ^ P.string_of_exchange used
           ^ " and without "               ^ P.string_of_exchange unused ^ "."]
-    else []                                                      in
-  let iss n = kci n (P.S, P.S) (P.E, P.S)                        in
-  let ise n = kci n (P.S, P.E) (P.E, P.E)                        in
-  let rss n = kci n (P.S, P.S) (P.S, P.E)                        in
-  let res n = kci n (P.E, P.S) (P.E, P.E)                        in
-  let client_messages = range 1 (List.length (snd p)) // is_odd  in
-  let server_messages = range 1 (List.length (snd p)) // is_even in
+    else []                                                  in
+  let iss n = kci n (P.S, P.S) (P.E, P.S)                    in
+  let ise n = kci n (P.S, P.E) (P.E, P.E)                    in
+  let rss n = kci n (P.S, P.S) (P.S, P.E)                    in
+  let res n = kci n (P.E, P.S) (P.E, P.E)                    in
+  let client_messages = range 1 (P.nb_messages p) // is_odd  in
+  let server_messages = range 1 (P.nb_messages p) // is_even in
   List.concat (client_messages   /@ iss
                @ client_messages /@ ise
                @ server_messages /@ rss

@@ -66,6 +66,7 @@ val first_server_payload : protocol -> int
 val first_client_auth    : protocol -> int
 val first_server_auth    : protocol -> int
 
+val nb_messages      : protocol -> int
 val nth_message      : protocol -> int -> message
 val nth_cs_message   : protocol -> int -> cs_message
 val nth_message_size : protocol -> int -> int

@@ -100,9 +100,9 @@ let pre_shared : P.protocol -> string = fun p ->
   | _        -> error "pre_shared"
 
 let amplified_messages p =
-  let requests = range 1 (List.length (snd p))
+  let requests = range 1 (P.nb_messages p)
                  // is_odd
-                 // (fun msg -> msg < List.length (snd p)
+                 // (fun msg -> msg < P.nb_messages p
                                 && Proto.first_client_auth p > msg
                                 && (Proto.first_server_auth p <= msg + 1
                                     || Proto.nth_message_size p msg <
