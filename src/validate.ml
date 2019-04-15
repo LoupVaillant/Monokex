@@ -15,20 +15,20 @@ let rec remove_duplicates = function
               then no_dups
               else x :: no_dups
 
-let rec take_until f = function
+let rec take_while f = function
   | []     -> []
-  | x :: l -> if f x then x :: take_until f l else []
+  | x :: l -> if f x then x :: take_while f l else []
 
-let rec drop_until f = function
+let rec drop_while f = function
   | []     -> []
-  | x :: l -> if f x then l else drop_until f l
+  | x :: l -> if f x then drop_while f l else x :: l
 
-let rec runs_of f = function
-  | [] -> []
-  | l  -> let next = drop_until (f |- not) l in
-          let run  = take_until f next       in
-          let rest = drop_until f next       in
-          run :: runs_of f rest
+let rec runs_of f l =
+  match drop_while (f |- not) l with
+  | []   -> []
+  | next -> let run  = take_while f next in
+            let rest = drop_while f next in
+            run :: runs_of f rest
 
 let pre_actions  p = List.concat (fst (P.cs_protocol p))
 let post_actions p = List.concat (snd (P.cs_protocol p))
@@ -51,17 +51,18 @@ let message_order p =
 
 let pre_shared_ephemeral p =
   let keys = P.get_cs_keys (pre_actions p) in
-  let is   = if List.mem P.IE keys then ["Pre-shared initiator ephemeral key."]
-             else []                       in
-  let rs   = if List.mem P.RE keys then ["Pre-shared respondent ephemeral key."]
-             else []                       in
-  is @ rs
+  if List.mem P.IE keys || List.mem P.RE keys
+  then ["Monokex does not support pre-shared ephemeral keys."]
+  else []
 
 let pre_done_key_exchange p =
   P.get_cs_exchanges (pre_actions p)
   /@ P.string_of_exchange
   /@ (fun e -> "Exchange " ^ e ^ " happens before protocol start.")
 
+(* TODO: tell the user exactly why the exchange cannot happen:
+ * We should tell which key is either missing or happens too late.
+ *)
 let impossible_exchanges p =
   all_actions p
   |> List.fold_left
@@ -94,12 +95,12 @@ let duplicate_keys p =
 
 let two_keys_in_a_row p =
   all_actions p
-  |> drop_until P.is_cs_exchange
+  |> drop_while P.is_cs_key (* remove unencrypted keys *)
   |> runs_of    P.is_cs_key
   |> List.filter (fun run -> List.length run > 1)
   |> (function
       |[] -> []
-      | _  -> [paragraph "Unimplemented feature: two encrypted keys in a row."])
+      | _  -> ["Monokex does not support two encrypted keys in a row."])
 
 let unused_key p =
   let keys      = P.all_keys      p in
@@ -131,17 +132,29 @@ let must_use_ephemeral p =
                @ server_messages /@ rss
                @ server_messages /@ res)
 
+(* Aggregate all verifications         *)
+(* Several error messages may be given *)
 let v p =
-  let simple_errors =
-            (message_order           p
-             @ pre_shared_ephemeral  p
-             @ pre_done_key_exchange p
-             @ impossible_exchanges  p
-             @ duplicate_exchanges   p
-             @ duplicate_keys        p
-             @ two_keys_in_a_row     p
-             @ unused_key            p)    in
-  let subtle_errors = must_use_ephemeral p in
-  remove_duplicates (if simple_errors = []
-                     then subtle_errors
-                     else simple_errors)
+  (* Select the first batch of errors, if any *)
+  let first_errors e =
+    match e /@ List.concat |> drop_while ((=) []) with
+    | []          -> []
+    | errors :: _ -> errors
+  in
+  remove_duplicates
+    (first_errors
+       [ [ message_order         p
+         ; duplicate_exchanges   p
+         ; duplicate_keys        p
+         ; unused_key            p
+         ]
+       ; [ pre_shared_ephemeral  p
+         ; pre_done_key_exchange p
+         ]
+       ; [ impossible_exchanges  p
+         ; two_keys_in_a_row     p
+         ]
+       ; [ must_use_ephemeral    p
+         ]
+       ]
+    )
