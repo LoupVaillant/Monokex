@@ -1,3 +1,8 @@
+(* Application wide parameters. *)
+val prefix          : string
+val enable_payloads : bool
+
+(* Ordinary utilities *)
 val pair    : 'a -> 'b -> 'a * 'b
 val cons    : 'a -> 'a list -> 'a list
 

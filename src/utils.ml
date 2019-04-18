@@ -1,3 +1,8 @@
+(* Application wide parameters. *)
+let prefix          = "monokex_"
+let enable_payloads = true
+
+(* Ordinary utilities *)
 let pair   a b        = (a, b)
 let cons   x l        = x :: l
 

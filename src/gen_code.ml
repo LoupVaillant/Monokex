@@ -1,10 +1,10 @@
 open Utils
 module P = Proto
 
-let prefix = "monokex_"
-
 type cs = Client | Server
 type lr = Local  | Remote
+
+let cs_of_int i = if i mod 2 == 1 then Client else Server
 
 let map_cs a b cs = match cs with Client -> a | Server -> b
 let map_lr a b lr = match lr with Local  -> a | Remote -> b
@@ -21,24 +21,16 @@ let is_authenticated protocol =
 
 let uses_ephemeral protocol =
   map_cs
-    (P.client_keys protocol // ((=) Proto.E) <> [])
-    (P.server_keys protocol // ((=) Proto.E) <> [])
+    (P.client_keys protocol // ((=) P.E) <> [])
+    (P.server_keys protocol // ((=) P.E) <> [])
 
-let cs_of_keys messages =
-  messages /@ (function Proto.Client _ -> Client
-                      | Proto.Server _ -> Server)
-
-let lr_of_cs csa csb = match csa, csb with
-  | Client, Client -> Local
-  | Server, Server -> Local
-  | Server, Client -> Remote
-  | Client, Server -> Remote
-
-let lr_of_protocol (cs : cs) (protocol : Proto.protocol) =
-  protocol
-  |> fst
-  |> cs_of_keys
-  |> List.map (lr_of_cs cs)
+let lr_of_protocol (cs : cs) (protocol : P.protocol) =
+  fst protocol
+  /@ (fun pre_shared -> match pre_shared, cs with
+                        | P.Client _, Client -> Local
+                        | P.Server _, Server -> Local
+                        | P.Client _, Server -> Remote
+                        | P.Server _, Client -> Remote)
 
 let init_proto pattern cs protocol =
   let lr       = lr_of_protocol cs protocol                          in
@@ -83,73 +75,72 @@ let init_source pattern cs protocol =
 
 (* message_proto & message_body helpers *)
 (* nb reffers to the function number, and starts at 1 *)
-let receives nb =
-  check (nb >= 0) "receives";
-  nb <> 1
+let receives p nb = nb > 1
+let sends    p nb = nb <= List.length (snd p)
 
-let sends nb (messages : Proto.message list) =
-  check (nb >= 0) "sends";
-  nb <= List.length messages
+let sends_payload    p nb =
+  map_cs
+    (nb >= P.first_client_payload p)
+    (nb >= P.first_server_payload p)
+let receives_payload p nb =
+  map_cs
+    (nb > P.first_server_payload p)
+    (nb > P.first_client_payload p)
 
-let verifies nb protocol = Proto.first_auth protocol <  nb
-let auths    nb protocol = Proto.first_auth protocol <= nb
+let auths    p nb = P.first_auth p <= nb
+let verifies p nb = P.first_auth p <  nb
 
-let r_actions nb messages = if not (receives nb) then []
-                            else P.to_actions (List.nth messages (nb - 2))
-let s_actions nb messages = if not (sends nb messages) then []
-                            else P.to_actions (List.nth messages (nb - 1))
-
-let r_size nb protocol = Proto.nth_message_size protocol (nb - 1)
-let s_size nb protocol = Proto.nth_message_size protocol nb
+let gets_remote p nb = receives p nb &&
+                         List.mem P.S (P.nth_message p (nb - 1)
+                                       |> P.to_actions
+                                       |> P.get_keys)
 
 let message_proto pattern nb protocol =
-  let messages    = snd protocol                                         in
-  let cs          = if nb mod 2 = 1 then Client else Server              in
-  let gets_remote = List.mem (Proto.Key Proto.S) (r_actions nb messages) in
-  let session_key = nb >= List.length messages                           in
+  let cs          = cs_of_int nb                                         in
+  let session_key = nb >= List.length (snd protocol)                     in
   let current     = string_of_int nb                                     in
   let previous    = string_of_int (nb - 1)                               in
   let ctx         = [ctx_type cs; "*"; local cs ^ "_ctx"        ]        in
   let sk          = ["uint8_t " ; "" ; "session_key"    ; "[32]"]        in
   let rk          = ["uint8_t " ; "" ; remote cs ^ "_pk"; "[32]"]        in
   prototype
-    (if verifies nb protocol then "int" else "void")
+    (if verifies protocol nb then "int" else "void")
     (prefix ^ pattern ^ "_" ^ current)
     [ ctx
-    ; if session_key then sk else []
-    ; if gets_remote then rk else []
-    ; if sends nb messages then
-        let ss = string_of_int (s_size nb protocol) in
-        ["uint8_t "      ; ""; "msg" ^ current;  "[" ^ ss ^ "]"]
+    ; if session_key             then sk else []
+    ; if gets_remote protocol nb then rk else []
+    ; if sends protocol nb
+      then let size = string_of_int (P.nth_message_size protocol nb) in
+           ["uint8_t "      ; ""; "msg" ^ current ; "[" ^ size ^ "]"]
       else []
-    ; if receives nb then
-        let ss = string_of_int (r_size nb protocol) in
-        ["const uint8_t "; ""; "msg" ^ previous; "[" ^ ss ^ "]"]
+    ; if receives protocol nb
+      then let size = string_of_int (P.nth_message_size protocol (nb-1)) in
+           ["const uint8_t "; ""; "msg" ^ previous; "[" ^ size ^ "]"]
       else []
     ]
 
 let str_msg nb  = "msg" ^ string_of_int nb
 let key_comment key nb =
-  (if nb mod 2 = 0 then "<- R" else "-> I") ^ P.map_key "E" "S" key
+  (map_cs "-> I" "<- R" (cs_of_int nb)) ^ P.map_key "E" "S" key
 
-let message_offset       nb_keys = string_of_int (nb_keys * 32)
-let message_offset_space nb_keys =
+let message_offset nb_keys =
+  let message_offset = string_of_int (nb_keys * 32) in
   if nb_keys = 0
   then "     "
-  else " + " ^ message_offset nb_keys
+  else " + " ^ message_offset
 
 let receive_key message_number nb_keys key =
   let ctx_key = P.map_key "ctx->remote_pke" "ctx->remote_pk " key in
   "    kex_receive   (ctx, " ^ ctx_key
   ^ ", "                     ^ str_msg message_number
-  ^                            message_offset_space nb_keys
+  ^                            message_offset nb_keys
   ^ "      );  // "          ^ key_comment key message_number
   ^ "\n"
 
 let send_key message_number nb_keys key =
   let ctx_key = P.map_key "ctx->local_pke" "ctx->local_pk " key in
   "    kex_send      (ctx, " ^ str_msg message_number
-  ^                            message_offset_space nb_keys
+  ^                            message_offset nb_keys
   ^ "      , "               ^ ctx_key
   ^ " );  // "               ^ key_comment key message_number
   ^ "\n"
@@ -163,16 +154,16 @@ let exchange cs exchange =
   let cse = update "(ctx, ctx->local_sk  , ctx->remote_pke);  //    se" in
   let sse = update "(ctx, ctx->local_ske , ctx->remote_pk );  //    se" in
   match exchange with
-  | Proto.E, Proto.E -> ee
-  | Proto.S, Proto.S -> ss
-  | Proto.E, Proto.S -> map_cs ces ses cs
-  | Proto.S, Proto.E -> map_cs cse sse cs
+  | P.E, P.E -> ee
+  | P.S, P.S -> ss
+  | P.E, P.S -> map_cs ces ses cs
+  | P.S, P.E -> map_cs cse sse cs
 
 let auth message_number nb_keys =
   "    kex_auth      (ctx, " ^ str_msg message_number
   ^ (if nb_keys = 0
      then ");                              // auth\n"
-     else message_offset_space nb_keys
+     else message_offset nb_keys
           ^ ");                         // auth\n"
     )
 
@@ -180,68 +171,57 @@ let verify message_number nb_keys =
   "    if (kex_verify(ctx, " ^ str_msg message_number
   ^ (if nb_keys = 0
      then ")) { return -1; }               // verify\n"
-     else message_offset_space nb_keys
+     else message_offset nb_keys
           ^ ")) { return -1; }          // verify\n"
     )
 
-(* counts elements of a list, one by one. *)
-let rec counts p start = function
-  | []      -> []
-  | x :: xs -> let new_start = (if p x then 1 else 0) + start in
-               new_start :: counts p new_start xs
-let key_counts = counts P.is_key (-1)
+let key_counts =
+  let rec counts p start = function
+    | []      -> []
+    | x :: xs -> let new_start = (if p x then 1 else 0) + start in
+                 new_start :: counts p new_start xs
+  in
+  counts P.is_key (-1)
 
-let process_message process_key cs message_number message =
-  List.map2
-    (fun ke count ->
-      P.map_action (process_key message_number count) (exchange cs) ke
-    )
-    message
-    (key_counts message)
-  |> String.concat ""
+let process_message do_key does_av do_av protocol nb =
+  let cs      = cs_of_int nb                             in
+  let message = P.to_actions (P.nth_message protocol nb) in
+  let keys    = zip message (key_counts message)
+                /@ (fun (action, key_count)
+                    -> P.map_action
+                         (do_key nb key_count)
+                         (exchange cs)
+                         action)
+                |> String.concat ""                      in
+  let av      = if does_av protocol nb
+                then do_av nb (List.length (P.get_keys message))
+                else ""                                  in
+  keys ^ av
 
-let receive_message = process_message receive_key
-let send_message    = process_message send_key
+let receive_message = process_message receive_key verifies verify
+let send_message    = process_message send_key    auths    auth
 
 let message_body nb protocol =
-  let messages    = snd protocol                                         in
-  let cs          = if nb mod 2 == 1 then Client else Server             in
-  let session_key = nb >= List.length messages                           in
-  let gets_remote = List.mem (Proto.Key Proto.S) (r_actions nb messages) in
+  let messages    = snd protocol               in
+  let cs          = cs_of_int nb               in
+  let session_key = nb >= List.length messages in
   "\n{\n"
   ^ "    " ^ prefix ^ "ctx *ctx = &(" ^ local cs ^ "_ctx->ctx);\n"
-  ^ (if receives nb
-     then
-       let message = List.nth messages (nb - 2) |> P.to_actions in
-       let nb_keys = List.length (Proto.get_keys message)       in
-       receive_message cs (nb - 1) message
-       ^ (if verifies nb protocol
-          then verify (nb - 1) nb_keys
-          else "")
-     else ""
-    )
-  ^ (if sends nb messages
-     then
-       let message = List.nth messages (nb - 1) |> P.to_actions in
-       let nb_keys = List.length (Proto.get_keys message)       in
-       send_message cs nb message
-       ^ (if auths nb protocol
-          then auth nb nb_keys
-          else "")
-     else ""
-    )
-  ^ (if gets_remote
+  ^ (if receives protocol nb then receive_message protocol (nb-1) else "")
+  ^ (if sends    protocol nb then send_message    protocol  nb    else "")
+  ^ (if gets_remote protocol nb
      then "    copy32(" ^ remote cs ^ "_pk  , ctx->remote_pk);\n"
      else "")
   ^ (if session_key
      then "    copy32(session_key, ctx->keys + 96);\n"
           ^ "    WIPE_CTX(ctx);\n"
      else "";)
-  ^ (if verifies nb protocol
+  ^ (if verifies protocol nb
      then "    return 0;\n"
      else "")
   ^ "}\n"
 
+(* Generate source code for the message functions *)
 let message_header pattern nb protocol =
   message_proto pattern nb protocol ^ ";\n"
 
@@ -252,6 +232,7 @@ let message_source pattern nb protocol =
 let print_lines channel lines =
   List.iter (fun line -> output_string channel (line ^ "\n")) lines
 
+(* Common source code *)
 let print_header_prefix channel =
   print_lines channel
     [ "#include <inttypes.h>"
@@ -390,6 +371,7 @@ let print_source_prefix channel =
     ; ""
     ]
 
+(* Specific source code *)
 let block_comment comment =
   let slashes = "////" ^ String.make (String.length comment) '/' ^ "////" in
   slashes ^ "\n/// " ^ comment ^ " ///\n" ^ slashes

@@ -131,7 +131,6 @@ let first_server_payload = function
   | []        -> 1
   | _ :: msgs -> first_client_payload msgs
 
-
 let handshake : P.protocol -> string = fun p ->
   let send sender receiver msg_num =
     "- The "          ^ sender
