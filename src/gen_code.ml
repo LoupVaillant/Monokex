@@ -183,7 +183,7 @@ let key_counts =
   in
   counts P.is_key (-1)
 
-let process_message do_key does_av do_av protocol nb =
+let process_message do_key do_av protocol nb =
   let cs      = cs_of_int nb                             in
   let message = P.to_actions (P.nth_message protocol nb) in
   let keys    = zip message (key_counts message)
@@ -193,13 +193,13 @@ let process_message do_key does_av do_av protocol nb =
                          (exchange cs)
                          action)
                 |> String.concat ""                      in
-  let av      = if does_av protocol nb
+  let av      = if P.first_auth protocol <= nb
                 then do_av nb (List.length (P.get_keys message))
                 else ""                                  in
   keys ^ av
 
-let receive_message = process_message receive_key verifies verify
-let send_message    = process_message send_key    auths    auth
+let receive_message = process_message receive_key verify
+let send_message    = process_message send_key    auth
 
 let message_body nb protocol =
   let messages    = snd protocol               in
