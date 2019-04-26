@@ -1,0 +1,8 @@
+#load "str.cma"
+#load "utils.cmo"
+#load "proto.cmo"
+#load "scan.cmo"
+#load "parsec.cmo"
+#load "validate.cmo"
+#load "gen_spec.cmo"
+#load "gen_code.cmo"
