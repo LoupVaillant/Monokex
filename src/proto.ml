@@ -103,21 +103,27 @@ let rec first_like f = function
 let fst_exch_like f p = first_like
                           (List.exists f)
                           (snd p /@ to_actions /@ get_exchanges)
-let fst_key_like f p = first_like
-                         (List.exists f)
-                         (snd p /@ cs_message /@ get_cs_keys)
+
+let contains k e = match k with
+  | IE -> fst e = E
+  | IS -> fst e = S
+  | RE -> snd e = E
+  | RS -> snd e = S
 
 let first_auth     p     = fst_exch_like (const true) p
-let first_exchange p e   = fst_exch_like ((=) e) p
-let first_used_key p k   = fst_key_like  ((=) k) p
+let first_exchange p e   = fst_exch_like ((=) e     ) p
+let first_used_key p k   = fst_exch_like (contains k) p
 let uses_exchange  p e n = first_exchange p e <= n
 let uses_key       p k n = first_used_key p k <= n
 
 let to_odd  n = if is_odd  n then n else n + 1
 let to_even n = if is_even n then n else n + 1
 
-let first_client_payload p = first_used_key p IE     |> to_odd
-let first_server_payload p = first_used_key p RE     |> to_even
+let first_client_payload p = first_used_key p IE |> to_odd
+let first_server_payload p = first_used_key p RE |> to_even
+let first_payload        p = min
+                               (first_client_payload p)
+                               (first_server_payload p)
 
 let nb_messages      p   = List.length (snd p)
 let nth_message      p n = if  n <= 0 || n > nb_messages p

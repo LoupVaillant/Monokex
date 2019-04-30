@@ -63,6 +63,7 @@ val uses_key      : protocol -> cs_key   -> int -> bool
 
 val first_client_payload : protocol -> int
 val first_server_payload : protocol -> int
+val first_payload        : protocol -> int
 
 val nb_messages      : protocol -> int
 val nth_message      : protocol -> int -> message
