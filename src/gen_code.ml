@@ -87,36 +87,56 @@ let receives_payload p nb =
     (nb > P.first_server_payload p)
     (nb > P.first_client_payload p)
 
-let auths    p nb = P.first_auth p <= nb
-let verifies p nb = P.first_auth p <  nb
-
 let gets_remote p nb = receives p nb &&
                          List.mem P.S (P.nth_message p (nb - 1)
                                        |> P.to_actions
                                        |> P.get_keys)
 
-let message_proto pattern nb protocol =
-  let cs          = cs_of_int nb                                         in
-  let session_key = nb >= List.length (snd protocol)                     in
-  let current     = string_of_int nb                                     in
-  let previous    = string_of_int (nb - 1)                               in
-  let ctx         = [ctx_type cs; "*"; local cs ^ "_ctx"        ]        in
-  let sk          = ["uint8_t " ; "" ; "session_key"    ; "[32]"]        in
-  let rk          = ["uint8_t " ; "" ; remote cs ^ "_pk"; "[32]"]        in
+let message_size uses_payloads p nb =
+  if uses_payloads || not (P.is_amplified p nb)
+  then P.nth_message_size p nb
+  else max (P.nth_message_size p nb) (P.nth_message_size p (nb + 1))
+
+let message_proto uses_payloads pattern p nb =
+  let cs               = cs_of_int nb                                  in
+  let sends_payload    = uses_payloads && P.first_payload p <= nb      in
+  let receives_payload = uses_payloads && P.first_payload p <  nb      in
+  let current          = string_of_int nb                              in
+  let payload          = if uses_payloads then "p" else ""             in
+  let previous         = string_of_int (nb - 1)                        in
+  let ctx              = [ctx_type cs; "*"; local cs ^ "_ctx"        ] in
+  let sk               = ["uint8_t " ; "" ; "session_key"    ; "[32]"] in
+  let rk               = ["uint8_t " ; "" ; remote cs ^ "_pk"; "[32]"] in
+  let sent_message     =
+    if sends p nb
+    then let size = string_of_int (message_size uses_payloads p nb)     in
+         ["uint8_t "      ; ""; "msg" ^ current ; "[" ^ size ^ "]"]
+    else []                                                             in
+  let received_message =
+    if receives p nb
+    then let size = string_of_int (message_size uses_payloads p (nb-1)) in
+         ["const uint8_t "; ""; "msg" ^ previous; "[" ^ size ^ "]"]
+    else []                                                             in
+  let sent_payload     =
+    if sends_payload && nb < P.nb_messages p
+    then ["uint8_t "; ""; "payload_key" ^ current ; "[32]"]
+    else []
+  in
+  let received_payload =
+    if receives_payload && nb <= P.nb_messages p
+    then ["uint8_t "; ""; "payload_key" ^ previous ; "[32]"]
+    else []
+  in
   prototype
-    (if verifies protocol nb then "int" else "void")
-    (prefix ^ pattern ^ "_" ^ current)
+    (if P.first_auth p < nb then "int" else "void")
+    (prefix ^ pattern ^ "_" ^ payload ^ current)
     [ ctx
-    ; if session_key             then sk else []
-    ; if gets_remote protocol nb then rk else []
-    ; if sends protocol nb
-      then let size = string_of_int (P.nth_message_size protocol nb) in
-           ["uint8_t "      ; ""; "msg" ^ current ; "[" ^ size ^ "]"]
-      else []
-    ; if receives protocol nb
-      then let size = string_of_int (P.nth_message_size protocol (nb-1)) in
-           ["const uint8_t "; ""; "msg" ^ previous; "[" ^ size ^ "]"]
-      else []
+    ; sent_payload
+    ; received_payload
+    ; if nb >= P.nb_messages p then sk else []
+    ; if gets_remote p nb      then rk else []
+    ; sent_message
+    ; received_message
     ]
 
 let str_msg nb  = "msg" ^ string_of_int nb
@@ -183,51 +203,59 @@ let key_counts =
   in
   counts P.is_key (-1)
 
-let process_message do_key do_av protocol nb =
-  let cs      = cs_of_int nb                             in
-  let message = P.to_actions (P.nth_message protocol nb) in
+let process_message do_key do_av uses_payloads p nb =
+  let cs      = cs_of_int nb                      in
+  let message = P.to_actions (P.nth_message p nb) in
   let keys    = zip message (key_counts message)
                 /@ (fun (action, key_count)
                     -> P.map_action
                          (do_key nb key_count)
                          (exchange cs)
                          action)
-                |> String.concat ""                      in
-  let av      = if P.first_auth protocol <= nb
+                |> String.concat ""               in
+  let av      = if P.first_auth p <= nb
                 then do_av nb (List.length (P.get_keys message))
-                else ""                                  in
-  keys ^ av
+                else ""                           in
+  let pad     =   let size_big   = message_size uses_payloads p nb in
+                  let size_small = P.nth_message_size         p nb in
+                  if size_big > size_small
+                  then "    for (size_t i = " ^ string_of_int size_small
+                       ^ "; i < "             ^ string_of_int size_big
+                       ^ "; i++) { "          ^ str_msg nb
+                       ^ "[i] = 0; }\n"
+                  else ""                         in
+  keys ^ pad ^ av
 
-let receive_message = process_message receive_key verify
+let receive_message = process_message receive_key verify true
 let send_message    = process_message send_key    auth
 
-let message_body nb protocol =
-  let messages    = snd protocol               in
+let message_body uses_payloads p nb =
+  let messages    = snd p                      in
   let cs          = cs_of_int nb               in
   let session_key = nb >= List.length messages in
   "\n{\n"
   ^ "    " ^ prefix ^ "ctx *ctx = &(" ^ local cs ^ "_ctx->ctx);\n"
-  ^ (if receives protocol nb then receive_message protocol (nb-1) else "")
-  ^ (if sends    protocol nb then send_message    protocol  nb    else "")
-  ^ (if gets_remote protocol nb
+  ^ (if receives p nb then receive_message            p (nb-1) else "")
+  ^ (if sends    p nb then send_message uses_payloads p  nb    else "")
+  ^ (if gets_remote p nb
      then "    copy32(" ^ remote cs ^ "_pk  , ctx->remote_pk);\n"
      else "")
   ^ (if session_key
      then "    copy32(session_key, ctx->keys + 96);\n"
           ^ "    WIPE_CTX(ctx);\n"
      else "";)
-  ^ (if verifies protocol nb
+  ^ (if P.first_auth p < nb
      then "    return 0;\n"
      else "")
   ^ "}\n"
 
 (* Generate source code for the message functions *)
-let message_header pattern nb protocol =
-  message_proto pattern nb protocol ^ ";\n"
+let message_header uses_payload pattern p nb =
+  message_proto uses_payload pattern p nb  ^ ";\n"
 
-let message_source pattern nb protocol =
-  message_proto pattern nb protocol
-  ^ message_body nb protocol
+let message_source uses_payload pattern p nb =
+  message_proto uses_payload pattern p nb
+  ^ message_body uses_payload p nb
 
 let print_lines channel lines =
   List.iter (fun line -> output_string channel (line ^ "\n")) lines
@@ -376,31 +404,32 @@ let block_comment comment =
   let slashes = "////" ^ String.make (String.length comment) '/' ^ "////" in
   slashes ^ "\n/// " ^ comment ^ " ///\n" ^ slashes
 
-let print_header_pattern channel pattern protocol =
+let print_header_pattern channel pattern p =
   let lower_pattern = String.lowercase_ascii pattern in
   print_lines channel
     [ block_comment pattern
-    ; init_header lower_pattern Client protocol
-    ; init_header lower_pattern Server protocol
+    ; init_header lower_pattern Client p
+    ; init_header lower_pattern Server p
     ];
-  let messages    = snd protocol         in
-  let nb_messages = List.length messages in
+  let nb_messages = List.length (snd p) in
   for i = 1 to nb_messages + 1 do
-    output_string channel (message_header lower_pattern i protocol ^ "\n")
+    output_string channel (message_header false lower_pattern p i ^ "\n");
+    output_string channel (message_header true  lower_pattern p i ^ "\n");
   done
 
-let print_source_pattern channel pattern protocol =
+let print_source_pattern channel pattern p =
   let lower_pattern = String.lowercase_ascii pattern in
   print_lines channel
     [ block_comment pattern
     ; "static const uint8_t pid_" ^ lower_pattern
       ^ "[16] = \"Monokex "       ^ pattern ^ "\";"
     ; ""
-    ; init_source pattern Client protocol
-    ; init_source pattern Server protocol
+    ; init_source pattern Client p
+    ; init_source pattern Server p
     ];
-  let messages    = snd protocol         in
+  let messages    = snd p                in
   let nb_messages = List.length messages in
   for i = 1 to nb_messages + 1 do
-    output_string channel (message_source lower_pattern i protocol ^ "\n")
+    output_string channel (message_source false lower_pattern p i ^ "\n");
+    output_string channel (message_source true  lower_pattern p i ^ "\n");
   done

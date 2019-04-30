@@ -1,6 +1,5 @@
 (* Application wide parameters. *)
-let prefix          = "monokex_"
-let enable_payloads = true
+let prefix = "monokex_"
 
 (* Ordinary utilities *)
 let pair   a b        = (a, b)
