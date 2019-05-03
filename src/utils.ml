@@ -67,8 +67,9 @@ let grid =
   let some = function None -> error "grid" | Some s -> s
   in
   fun l -> (transpose l /@ align |> transpose)
-           /@ (List.map some)
-           /@ (List.fold_left (^) "")
+           /@ List.map some
+           /@ String.concat ""
+           /@ Str.global_replace (Str.regexp " *$") ""
 
 let prototype return_type function_name args =
   let indent = match args // (<>) [] with
