@@ -203,8 +203,7 @@ let key_counts =
   in
   counts P.is_key (-1)
 
-let process_message do_key do_av uses_payloads p nb =
-  let cs      = cs_of_int nb                      in
+let process_message do_key do_av uses_payloads cs p nb =
   let message = P.to_actions (P.nth_message p nb) in
   let keys    = zip message (key_counts message)
                 /@ (fun (action, key_count)
@@ -235,8 +234,8 @@ let message_body uses_payloads p nb =
   let session_key = nb >= List.length messages in
   "\n{\n"
   ^ "    " ^ prefix ^ "ctx *ctx = &(" ^ local cs ^ "_ctx->ctx);\n"
-  ^ (if receives p nb then receive_message            p (nb-1) else "")
-  ^ (if sends    p nb then send_message uses_payloads p  nb    else "")
+  ^ (if receives p nb then receive_message            cs p (nb-1) else "")
+  ^ (if sends    p nb then send_message uses_payloads cs p  nb    else "")
   ^ (if gets_remote p nb
      then "    copy32(" ^ remote cs ^ "_pk  , ctx->remote_pk);\n"
      else "")
@@ -370,7 +369,7 @@ let print_source_prefix channel =
     ; "    xor32(dest, ctx->keys + 64);"
     ; "}"
     ; ""
-    ; "void kex_init(" ^ prefix ^ "ctx *ctx, const uint8_t pid[16])"
+    ; "static void kex_init(" ^ prefix ^ "ctx *ctx, const uint8_t pid[16])"
     ; "{"
     ; "    copy32(ctx->keys     , zero); // first chaining key"
     ; "    copy32(ctx->keys + 64, zero); // first encryption key"
@@ -380,7 +379,7 @@ let print_source_prefix channel =
     ; ""
     ; "static void kex_seed(" ^ prefix ^ "ctx *ctx, uint8_t random_seed[32])"
     ; "{"
-    ; "    copy32(ctx->local_ske        , random_seed);"
+    ; "    copy32(ctx->local_ske, random_seed);"
     ; "    crypto_wipe(random_seed, 32); // auto wipe seed to avoid reuse"
     ; "    crypto_x25519_public_key(ctx->local_pke, ctx->local_ske);"
     ; "}"
@@ -394,7 +393,7 @@ let print_source_prefix channel =
     ; "{"
     ;"    if (local_pk == 0) crypto_x25519_public_key(ctx->local_pk, local_sk);"
     ;"    else               copy32                  (ctx->local_pk, local_pk);"
-    ; "    copy32(ctx->local_sk         , local_sk   );"
+    ; "    copy32(ctx->local_sk, local_sk);"
     ; "}"
     ; ""
     ]
