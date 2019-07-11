@@ -1,5 +1,6 @@
 (* Application wide parameters. *)
-let prefix = "monokex_"
+let prefix      = "crypto_kex_"
+let prefix_caps = String.uppercase_ascii prefix
 
 (* Ordinary utilities *)
 let pair   a b        = (a, b)
