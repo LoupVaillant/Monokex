@@ -1,5 +1,6 @@
 (* Application wide parameters. *)
-val prefix          : string
+val prefix     : string
+val prefix_caps: string
 
 (* Ordinary utilities *)
 val pair    : 'a -> 'b -> 'a * 'b
@@ -21,13 +22,15 @@ val is_even : int -> bool
 val is_odd  : int -> bool
 
 (* List handling *)
-val last     : 'a list -> 'a
-val init     : 'a list -> 'a list
-val range    : int -> int -> int list
-val mapi     : int -> (int -> 'a -> 'b) -> 'a list -> 'b list
-val zip_with : ('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list
-val zip      : 'a list -> 'b list -> ('a * 'b) list
-val map2     : ('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list
+val last       : 'a list -> 'a
+val init       : 'a list -> 'a list
+val range      : int -> int -> int list
+val mapi       : int -> (int -> 'a -> 'b) -> 'a list -> 'b list
+val zip_with   : ('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list
+val zip        : 'a list -> 'b list -> ('a * 'b) list
+val map2       : ('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list
+val take_while : ('a -> bool) -> 'a list -> 'a list
+val drop_while : ('a -> bool) -> 'a list -> 'a list
 
 (* Pretty printing functions *)
 val pad_right : string list      -> string list

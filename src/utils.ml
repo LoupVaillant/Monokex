@@ -38,6 +38,12 @@ let zip l1 l2 = zip_with pair l1 l2
 let rec map2 f l1 l2 = match l1, l2 with
   | x::l1, y::l2-> f x y  :: map2 f l1 l2
   | _           -> []
+let rec take_while p = function
+  | x :: l -> if p x then x :: take_while p l else []
+  | []     -> []
+let rec drop_while p = function
+  | x :: l -> if p x then drop_while p l else x :: l
+  | []     -> []
 
 (* Pretty printing functions *)
 let pad_right strings =

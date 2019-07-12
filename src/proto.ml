@@ -131,8 +131,13 @@ let nth_message      p n = if  n <= 0 || n > nb_messages p
                            else List.nth (snd p) (n - 1)
 let nth_cs_message   p n = cs_message (nth_message p n)
 let nth_message_size p n =
-  let nb_keys = List.length (get_keys (to_actions(nth_message p n)))  in
-  let nb_tags = if first_auth p <= n then 1 else 0                    in
+  let actions   = to_actions (nth_message p n)                            in
+  let nb_before = actions |> take_while is_key |> get_keys |> List.length in
+  let nb_after  = actions |> drop_while is_key |> get_keys |> List.length in
+  let nb_keys   = nb_before + nb_after                                    in
+  let nb_tags   = if      first_auth p < n then 1 + nb_keys
+                  else if first_auth p = n then 1 + nb_after
+                  else                          0                         in
   nb_keys*32 + nb_tags*16
 
 let is_amplified p n =

@@ -11,13 +11,12 @@ let map_lr a b lr = match lr with Local  -> a | Remote -> b
 
 let local    cs = map_cs "client" "server" cs
 let remote   cs = map_cs "server" "client" cs
-let ctx_type cs = prefix ^ local cs ^ "_ctx "
 
 (* init_header and init_source helpers *)
 let is_authenticated protocol =
   map_cs
-    (P.client_keys protocol <> [])
-    (P.server_keys protocol <> [])
+    (List.mem P.S (P.client_keys protocol))
+    (List.mem P.S (P.server_keys protocol))
 
 let uses_ephemeral protocol =
   map_cs
@@ -32,16 +31,16 @@ let lr_of_protocol (cs : cs) (protocol : P.protocol) =
                         | P.Client _, Server -> Remote
                         | P.Server _, Client -> Remote)
 
-let init_proto pattern cs protocol =
-  let lr       = lr_of_protocol cs protocol                          in
-  let css      = map_cs "client" "server" cs                         in
-  let ctx      = [ ctx_type cs    ; "*"; local cs ^ "_ctx" ]         in
-  let seed     = ["uint8_t "      ; "" ; "random_seed"    ; "[32]" ] in
-  let sk       = ["const uint8_t "; "" ; local  cs ^ "_sk"; "[32]" ] in
-  let pk       = ["const uint8_t "; "" ; local  cs ^ "_pk"; "[32]" ] in
-  let r        = ["const uint8_t "; "" ; remote cs ^ "_pk"; "[32]" ] in
+let init_proto u8 pattern cs protocol =
+  let lr       = lr_of_protocol cs protocol                             in
+  let css      = map_cs "client" "server" cs                            in
+  let ctx      = [ prefix ^ "ctx "   ; "*"; "ctx" ]                     in
+  let seed     = [u8 ^ " "           ; "" ; "random_seed"    ; "[32]" ] in
+  let sk       = ["const " ^ u8 ^ " "; "" ; local  cs ^ "_sk"; "[32]" ] in
+  let pk       = ["const " ^ u8 ^ " "; "" ; local  cs ^ "_pk"; "[32]" ] in
+  let r        = ["const " ^ u8 ^ " "; "" ; remote cs ^ "_pk"; "[32]" ] in
   prototype
-    "void"  (prefix ^ pattern ^ "_init_" ^  css)
+    "void"  (prefix ^ pattern ^ "_" ^ css ^ "_init")
     [ ctx
     ; if uses_ephemeral   protocol cs then seed else []
     ; if is_authenticated protocol cs then sk   else []
@@ -49,354 +48,549 @@ let init_proto pattern cs protocol =
     ; if List.mem Remote lr           then r    else []
     ]
 
+let knows_remote protocol cs = List.mem Remote (lr_of_protocol cs protocol)
+
+let flip_exchange = function
+  | (P.E, P.S) -> (P.S, P.E)
+  | (P.S, P.E) -> (P.E, P.S)
+  | (P.E, P.E) -> (P.E, P.E)
+  | (P.S, P.S) -> (P.S, P.S)
+let flip_action = function
+  | P.Key      k -> P.Key k
+  | P.Exchange e -> P.Exchange (flip_exchange e)
+let flip_actions actions = List.map flip_action actions
+let local_protocol protocol = function
+  | Client -> snd protocol /@ P.map_message id           id
+  | Server -> snd protocol /@ P.map_message flip_actions flip_actions
+
+let code_of_action i =
+  let wrap s = if i == 0 then s else "(" ^ s ^ " << " ^ string_of_int i ^ ")"
+  in function
+  | P.Key P.E             -> wrap "E"
+  | P.Key P.S             -> wrap "S"
+  | P.Exchange (P.E, P.E) -> wrap "EE"
+  | P.Exchange (P.E, P.S) -> wrap "ES"
+  | P.Exchange (P.S, P.E) -> wrap "SE"
+  | P.Exchange (P.S, P.S) -> wrap "SS"
+let code_of_actions actions =
+  let shifts = range 0 (List.length actions - 1) /@ (fun i -> i * 3) in
+  let exprs  = map2 code_of_action shifts actions                    in
+  String.concat " + " exprs ^ ";\n"
+let code_of_protocol protocol cs =
+  let prefixes = range 0 3 /@
+                   (fun i -> "    ctx->messages[" ^ string_of_int i ^ "] = ") in
+  let messages = local_protocol protocol cs /@ code_of_actions                in
+  let filler   = range 1 4 /@ (fun _ -> "0;\n")                               in
+  map2 (fun prefix message -> prefix ^ message) prefixes (messages @ filler)
+  |> String.concat ""
+
+let contains_remote proto_half cs =
+  let keys = proto_half /@ P.get_cs_keys |> List.concat in
+  map_cs (List.mem P.RS keys) (List.mem P.IS keys) cs
+let has_remote  proto cs = contains_remote (proto |> P.cs_protocol |> fst) cs
+let gets_remote proto cs = contains_remote (proto |> P.cs_protocol |> snd) cs
+let should_send cs       = map_cs true false cs
+let flags_of_protocol protocol cs =
+  let flags = []
+              @ (if has_remote  protocol cs then ["HAS_REMOTE" ] else [])
+              @ (if gets_remote protocol cs then ["GETS_REMOTE"] else [])
+              @ (if should_send          cs then ["SHOULD_SEND"] else []) in
+  if flags = []
+  then ""
+  else "    ctx->flags |= " ^ String.concat " | " flags ^ ";\n"
+
 let init_body pattern cs protocol =
-  let lr     = lr_of_protocol   cs protocol                                in
-  let init   = "    kex_init   (ctx, pid_" ^ pattern ^ ");\n"              in
-  let seed   = "    kex_seed   (ctx, random_seed);\n"                      in
-  let sk_pk  = "    kex_locals (ctx, " ^ local cs ^ "_sk, "
-               ^                         local cs ^ "_pk);\n"              in
-  let r      = "    kex_receive(ctx, ctx->remote_pk, "^remote cs^"_pk);\n" in
-  let l      = "    kex_receive(ctx, ctx->local_pk, ctx->local_pk);\n"     in
+  let init   = "    kex_init    (ctx, pid_" ^ pattern ^ ");\n"  in
+  let seed   = "    kex_seed    (ctx, random_seed);\n"          in
+  let sk_pk  = "    kex_locals  (ctx, " ^ local cs ^ "_sk, "
+               ^                          local cs ^ "_pk);\n"  in
+  let cp_r   = "    copy(ctx->sr, " ^ remote cs ^ "_pk, 32);\n" in
+  let r      = "    kex_mix_hash(ctx, ctx->sr, 32);\n"          in
+  let l      = "    kex_mix_hash(ctx, ctx->sp, 32);\n"          in
   "\n{\n"
-  ^ "    " ^ prefix ^ "ctx *ctx = &(" ^ local cs ^ "_ctx->ctx);\n"
   ^ init
   ^ (if uses_ephemeral   protocol cs then seed  else "")
   ^ (if is_authenticated protocol cs then sk_pk else "")
-  ^ (lr /@ (function Local -> l | Remote -> r) |> String.concat "")
+  ^ (if knows_remote     protocol cs then cp_r  else "")
+  ^ (flags_of_protocol protocol cs)
+  ^ (code_of_protocol  protocol cs)
+  ^ (lr_of_protocol   cs protocol
+     /@ (function Local -> l | Remote -> r) |> String.concat "")
   ^ "}\n"
 
 (* Generate source code for the init functions *)
+let action_comment r protocol msg_nb =
+  let msg_size = string_of_int (P.nth_message_size protocol msg_nb)  in
+  let rw       = if r then "read " else "write"                      in
+  let actions  = P.map_message id id (P.nth_message protocol msg_nb) in
+  let remote   = r && List.mem (P.Key P.S) actions                   in
+  "// - " ^ rw ^ " (" ^ msg_size ^ " bytes)\n"
+  ^ if remote then "// - remote key\n" else ""
+
+let action_comments cs protocol =
+  range 1 (P.nb_messages protocol)
+  /@ (fun msg_nb -> let r = map_cs (is_even msg_nb) (is_odd msg_nb) cs in
+                    action_comment r protocol msg_nb)
+  |> String.concat ""
+
 let init_header pattern cs protocol =
-  init_proto pattern cs protocol ^ ";\n"
+  ""
+  ^ "// Initialises a handshake context for the " ^ local cs ^ ".\n"
+  ^ "// Actions happen in the following order:\n"
+  ^ "//\n"
+  ^ action_comments cs protocol
+  ^ "// - final\n"
+  ^ init_proto "uint8_t" pattern cs protocol ^ ";\n"
 
 let init_source pattern cs protocol =
   let lower_pattern = String.lowercase_ascii pattern in
-  init_proto lower_pattern cs protocol ^ init_body lower_pattern cs protocol
+  init_proto "u8" lower_pattern cs protocol
+  ^ init_body lower_pattern cs protocol
 
-(* message_proto & message_body helpers *)
-(* nb reffers to the function number, and starts at 1 *)
-let receives p nb = nb > 1
-let sends    p nb = nb <= List.length (snd p)
+(* Common source code *)
+let header_prefix =
+  [ "#include <inttypes.h>"
+  ; "#include <stddef.h>"
+  ; ""
+  ; "typedef struct {"
+  ; "    uint8_t  hash[64];    // chaining hash"
+  ; "    uint8_t  s [32];      // static    secret key"
+  ; "    uint8_t  sp[32];      // static    public key"
+  ; "    uint8_t  e [32];      // ephemeral secret key"
+  ; "    uint8_t  ep[32];      // ephemeral public key"
+  ; "    uint8_t  sr[32];      // static    remote key"
+  ; "    uint8_t  er[32];      // ephemeral remote key"
+  ; "    uint16_t messages[4]; // Message tokens"
+  ; "    unsigned short flags; // Status flags"
+  ; "} " ^ prefix ^ "ctx;"
+  ; ""
+  ; "typedef enum {"
+  ; "    "^prefix_caps^"READ,  "^prefix_caps^"WRITE, "^prefix_caps^"REMOTE_KEY,"
+  ; "    "^prefix_caps^"FINAL, "^prefix_caps^"NONE"
+  ; "} " ^ prefix ^ "action;"
+  ; ""
+  ; "// Basic read & write functions"
+  ; "// Maximum message size is 96 bytes"
+  ; "//"
+  ; "// If message_size is bigger than the actual message, the message will"
+  ; "// be padded with zeroes."
+  ; "//"
+  ; "// If message_size is smaller than the actual message, the behaviour is"
+  ; "// undefined.  (The implementation tries to fail loudly, though)"
+  ; "//"
+  ; "// Padding bytes are ignored by " ^ prefix ^ "read()."
+  ; "int  "^prefix^"read ("^prefix^"ctx *ctx, const uint8_t *msg, size_t size);"
+  ; "void "^prefix^"write("^prefix^"ctx *ctx, uint8_t       *msg, size_t size);"
+  ; ""
+  ; "// Advanced read & write functions (with payload)"
+  ; "// Maximum message size is 96 bytes, plus the size of the payload."
+  ; "//"
+  ; "// If payload is NULL, no payload is sent. Payload_size must be zero."
+  ; "// If payload_size is zero, but payload is not NULL, an empty payload is"
+  ; "// sent."
+  ; prototype "int" (prefix ^ "read_p")
+      [ [ prefix ^ "ctx " ;  "*"; "ctx"                          ]
+      ; [ "uint8_t "      ;  "*"; "payload, size_t payload_size" ]
+      ; [ "const uint8_t ";  "*"; "message, size_t message_size" ]
+      ] ^ ";"
+  ; prototype "void" (prefix ^ "write_p")
+      [ [ prefix ^ "ctx " ; "*"; "ctx"                          ]
+      ; [ "uint8_t "      ; "*"; "message, size_t message_size" ]
+      ; [ "const uint8_t "; "*"; "payload, size_t payload_size" ]
+      ] ^ ";"
+  ; ""
+  ; "// Adds a prelude to the transcript hash."
+  ; "// Call once, just after " ^ prefix ^ "*_init()."
+  ; prototype "void" (prefix ^ "add_prelude")
+      [ [ prefix ^ "ctx *ctx"                           ]
+      ; [ "const uint8_t *prelude, size_t prelude_size" ]
+      ] ^ ";"
+  ; ""
+  ; "// Gets the remote key."
+  ; "// MUST be called as soon as the remote key has been transmitted."
+  ; "// (Sometimes the key is known in advance, and is never transmitted.)"
+  ; "void " ^ prefix ^ "remote_key(" ^ prefix ^ "ctx *ctx, uint8_t key[32]);"
+  ; ""
+  ; "// Gets the session key and wipes the context."
+  ; "// The extra key can be used as a second session key, or as a hash for"
+  ; "// channel binding."
+  ; prototype "void" (prefix ^ "final")
+      [ [ prefix ^ "ctx *ctx"       ]
+      ; [ "uint8_t session_key[32]" ]
+      ; [ "uint8_t extra_key  [32]" ]
+      ] ^ ";"
+  ; ""
+  ; "// Next action to perform. Can be used instead of hard coding everything."
+  ; "//"
+  ; "// "^prefix_caps^"READ        call "^prefix^"read()"
+  ; "// "^prefix_caps^"WRITE       call "^prefix^"write()"
+  ; "// "^prefix_caps^"REMOTE_KEY  call "^prefix^"remote_key()"
+  ; "// "^prefix_caps^"FINAL       call "^prefix^"final()"
+  ; "// "^prefix_caps^"NONE        " ^
+      "The context has been wiped, don't call anything."
+  ; "//"
+  ; "// If next_message_size is not NULL, the minimum size of the next"
+  ; "// message (without payload) will be written in it."
+  ; prototype (prefix ^ "action") (prefix ^ "next_action")
+      [ [ "const " ^ prefix ^ "ctx *ctx" ]
+      ; [ "size_t *next_message_size"    ]
+      ] ^ ";"
+  ]
 
-let sends_payload    p nb =
-  map_cs
-    (nb >= P.first_client_payload p)
-    (nb >= P.first_server_payload p)
-let receives_payload p nb =
-  map_cs
-    (nb > P.first_server_payload p)
-    (nb > P.first_client_payload p)
-
-let gets_remote p nb = receives p nb &&
-                         List.mem P.S (P.nth_message p (nb - 1)
-                                       |> P.to_actions
-                                       |> P.get_keys)
-
-let message_size uses_payloads p nb =
-  if uses_payloads || not (P.is_amplified p nb)
-  then P.nth_message_size p nb
-  else max (P.nth_message_size p nb) (P.nth_message_size p (nb + 1))
-
-let message_proto uses_payloads pattern p nb =
-  let cs               = cs_of_int nb                                  in
-  let sends_payload    = uses_payloads && P.first_payload p <= nb      in
-  let receives_payload = uses_payloads && P.first_payload p <  nb      in
-  let current          = string_of_int nb                              in
-  let payload          = if uses_payloads then "p" else ""             in
-  let previous         = string_of_int (nb - 1)                        in
-  let ctx              = [ctx_type cs; "*"; local cs ^ "_ctx"        ] in
-  let sk               = ["uint8_t " ; "" ; "session_key"    ; "[32]"] in
-  let rk               = ["uint8_t " ; "" ; remote cs ^ "_pk"; "[32]"] in
-  let sent_message     =
-    if sends p nb
-    then let size = string_of_int (message_size uses_payloads p nb)     in
-         ["uint8_t "      ; ""; "msg" ^ current ; "[" ^ size ^ "]"]
-    else []                                                             in
-  let received_message =
-    if receives p nb
-    then let size = string_of_int (message_size uses_payloads p (nb-1)) in
-         ["const uint8_t "; ""; "msg" ^ previous; "[" ^ size ^ "]"]
-    else []                                                             in
-  let sent_payload     =
-    if sends_payload && nb < P.nb_messages p
-    then ["uint8_t "; ""; "payload_key" ^ current ; "[32]"]
-    else []
-  in
-  let received_payload =
-    if receives_payload && nb <= P.nb_messages p
-    then ["uint8_t "; ""; "payload_key" ^ previous ; "[32]"]
-    else []
-  in
-  prototype
-    (if P.first_auth p < nb then "int" else "void")
-    (prefix ^ pattern ^ "_" ^ payload ^ current)
-    [ ctx
-    ; sent_payload
-    ; received_payload
-    ; if nb >= P.nb_messages p then sk else []
-    ; if gets_remote p nb      then rk else []
-    ; sent_message
-    ; received_message
-    ]
-
-let str_msg nb  = "msg" ^ string_of_int nb
-let key_comment key nb =
-  (map_cs "-> I" "<- R" (cs_of_int nb)) ^ P.map_key "E" "S" key
-
-let message_offset nb_keys =
-  let message_offset = string_of_int (nb_keys * 32) in
-  if nb_keys = 0
-  then "     "
-  else " + " ^ message_offset
-
-let receive_key message_number nb_keys key =
-  let ctx_key = P.map_key "ctx->remote_pke" "ctx->remote_pk " key in
-  "    kex_receive   (ctx, " ^ ctx_key
-  ^ ", "                     ^ str_msg message_number
-  ^                            message_offset nb_keys
-  ^ "      );  // "          ^ key_comment key message_number
-  ^ "\n"
-
-let send_key message_number nb_keys key =
-  let ctx_key = P.map_key "ctx->local_pke" "ctx->local_pk " key in
-  "    kex_send      (ctx, " ^ str_msg message_number
-  ^                            message_offset nb_keys
-  ^ "      , "               ^ ctx_key
-  ^ " );  // "               ^ key_comment key message_number
-  ^ "\n"
-
-let exchange cs exchange =
-  let update s = "    kex_update_key" ^ s ^ "\n"                        in
-  let ee  = update "(ctx, ctx->local_ske , ctx->remote_pke);  //    ee" in
-  let ss  = update "(ctx, ctx->local_sk  , ctx->remote_pk );  //    ss" in
-  let ces = update "(ctx, ctx->local_ske , ctx->remote_pk );  //    es" in
-  let ses = update "(ctx, ctx->local_sk  , ctx->remote_pke);  //    es" in
-  let cse = update "(ctx, ctx->local_sk  , ctx->remote_pke);  //    se" in
-  let sse = update "(ctx, ctx->local_ske , ctx->remote_pk );  //    se" in
-  match exchange with
-  | P.E, P.E -> ee
-  | P.S, P.S -> ss
-  | P.E, P.S -> map_cs ces ses cs
-  | P.S, P.E -> map_cs cse sse cs
-
-let auth message_number nb_keys =
-  "    kex_auth      (ctx, " ^ str_msg message_number
-  ^ (if nb_keys = 0
-     then ");                              // auth\n"
-     else message_offset nb_keys
-          ^ ");                         // auth\n"
-    )
-
-let verify message_number nb_keys =
-  "    if (kex_verify(ctx, " ^ str_msg message_number
-  ^ (if nb_keys = 0
-     then ")) { return -1; }               // verify\n"
-     else message_offset nb_keys
-          ^ ")) { return -1; }          // verify\n"
-    )
-
-let key_counts =
-  let rec counts p start = function
-    | []      -> []
-    | x :: xs -> let new_start = (if p x then 1 else 0) + start in
-                 new_start :: counts p new_start xs
-  in
-  counts P.is_key (-1)
-
-let process_message do_key do_av uses_payloads cs p nb =
-  let message = P.to_actions (P.nth_message p nb) in
-  let keys    = zip message (key_counts message)
-                /@ (fun (action, key_count)
-                    -> P.map_action
-                         (do_key nb key_count)
-                         (exchange cs)
-                         action)
-                |> String.concat ""               in
-  let av      = if P.first_auth p <= nb
-                then do_av nb (List.length (P.get_keys message))
-                else ""                           in
-  let pad     =   let size_big   = message_size uses_payloads p nb in
-                  let size_small = P.nth_message_size         p nb in
-                  if size_big > size_small
-                  then "    for (size_t i = " ^ string_of_int size_small
-                       ^ "; i < "             ^ string_of_int size_big
-                       ^ "; i++) { "          ^ str_msg nb
-                       ^ "[i] = 0; }\n"
-                  else ""                         in
-  keys ^ pad ^ av
-
-let receive_message = process_message receive_key verify true
-let send_message    = process_message send_key    auth
-
-let message_body uses_payloads p nb =
-  let messages    = snd p                      in
-  let cs          = cs_of_int nb               in
-  let session_key = nb >= List.length messages in
-  "\n{\n"
-  ^ "    " ^ prefix ^ "ctx *ctx = &(" ^ local cs ^ "_ctx->ctx);\n"
-  ^ (if receives p nb then receive_message            cs p (nb-1) else "")
-  ^ (if sends    p nb then send_message uses_payloads cs p  nb    else "")
-  ^ (if gets_remote p nb
-     then "    copy32(" ^ remote cs ^ "_pk  , ctx->remote_pk);\n"
-     else "")
-  ^ (if session_key
-     then "    copy32(session_key, ctx->keys + 96);\n"
-          ^ "    WIPE_CTX(ctx);\n"
-     else "";)
-  ^ (if P.first_auth p < nb
-     then "    return 0;\n"
-     else "")
-  ^ "}\n"
-
-(* Generate source code for the message functions *)
-let message_header uses_payload pattern p nb =
-  message_proto uses_payload pattern p nb  ^ ";\n"
-
-let message_source uses_payload pattern p nb =
-  message_proto uses_payload pattern p nb
-  ^ message_body uses_payload p nb
+let source_prefix =
+  [ "#include \"monocypher.h\""
+  ; "#include \"monokex.h\""
+  ; ""
+  ; "/////////////////"
+  ; "/// Utilities ///"
+  ; "/////////////////"
+  ; "#define FOR(i, start, end)  for (size_t (i) = (start); (i) < (end); (i)++)"
+  ; "#define WIPE_CTX(ctx)       crypto_wipe(ctx   , sizeof(*(ctx)))"
+  ; "#define WIPE_BUFFER(buffer) crypto_wipe(buffer, sizeof(buffer))"
+  ; ""
+  ; "// Message token bytecode"
+  ; "typedef enum { E=1, S=2, EE=3, ES=4, SE=5, SS=6 } action;"
+  ; "static int is_key     (unsigned i) { return i <= S;  }"
+  ; "static int is_exchange(unsigned i) { return i >= EE; }"
+  ; ""
+  ; "// Context status flags"
+  ; "#define IS_OK        1 // Allways 1 (becomes zero when wiped)"
+  ; "#define HAS_KEY      2 // True if we have a symmetric key"
+  ; "#define HAS_REMOTE   4 // True if we have the remote DH key"
+  ; "#define GETS_REMOTE  8 // True if the remote key is transmitted to us"
+  ; "#define SHOULD_SEND 16 // Send/receive toggle"
+  ; ""
+  ; "typedef uint8_t u8;"
+  ; ""
+  ; "// memcmp clone"
+  ; "static void copy(u8 *out, const u8 *in, size_t nb)"
+  ; "{"
+  ; "    FOR(i, 0, nb) out[i] = in[i];"
+  ; "}"
+  ; ""
+  ; "static void encrypt(u8 *out, const u8 *in, size_t size, const u8 key[32])"
+  ; "{"
+  ; "    static const u8 zero[8] = {0};"
+  ; "    crypto_chacha_ctx ctx;"
+  ; "    crypto_chacha20_init   (&ctx, key, zero);"
+  ; "    crypto_chacha20_encrypt(&ctx, out, in, size);"
+  ; "    WIPE_CTX(&ctx);"
+  ; "}"
+  ; ""
+  ; "static void mix_hash(u8 after[64], const u8 before[64],"
+  ; "                     const u8 *input, size_t input_size)"
+  ; "{"
+  ; "    crypto_blake2b_ctx ctx;"
+  ; "    crypto_blake2b_init  (&ctx);"
+  ; "    crypto_blake2b_update(&ctx, before, 64);"
+  ; "    crypto_blake2b_update(&ctx, input, input_size);"
+  ; "    crypto_blake2b_final (&ctx, after);"
+  ; "}"
+  ; ""
+  ; "/////////////////////"
+  ; "/// State machine ///"
+  ; "/////////////////////"
+  ; ""
+  ; "#define kex_mix_hash "^prefix^"add_prelude // it's the same thing"
+  ; ""
+  ; "void kex_mix_hash("^prefix^"ctx *ctx, const u8 *input, size_t input_size)"
+  ; "{"
+  ; "    mix_hash(ctx->hash, ctx->hash, input, input_size);"
+  ; "}"
+  ; ""
+  ; "static void kex_extra_hash(" ^ prefix ^ "ctx *ctx, u8 *out)"
+  ; "{"
+  ; "    u8 zero[1] = {0};"
+  ; "    u8 one [1] = {1};"
+  ; "    mix_hash(ctx->hash, ctx->hash, zero, 1); // next chaining hash"
+  ; "    mix_hash(out      , ctx->hash, one , 1); // extra hash"
+  ; "}"
+  ; ""
+  ; "static void kex_update_key(" ^ prefix ^ "ctx *ctx,"
+  ; "                           const u8 secret_key[32],"
+  ; "                           const u8 public_key[32])"
+  ; "{"
+  ; "    u8 tmp[32];"
+  ; "    crypto_x25519(tmp, secret_key, public_key);"
+  ; "    kex_mix_hash(ctx, tmp, 32);"
+  ; "    ctx->flags |= HAS_KEY;"
+  ; "    WIPE_BUFFER(tmp);"
+  ; "}"
+  ; ""
+  ; "static void kex_auth(" ^ prefix ^ "ctx *ctx, u8 tag[16])"
+  ; "{"
+  ; "    if (!(ctx->flags & HAS_KEY)) { return; }"
+  ; "    u8 tmp[64];"
+  ; "    kex_extra_hash(ctx, tmp);"
+  ; "    copy(tag, tmp, 16);"
+  ; "    WIPE_BUFFER(tmp);"
+  ; "}"
+  ; ""
+  ; "static int kex_verify(" ^ prefix ^ "ctx *ctx, const u8 tag[16])"
+  ; "{"
+  ; "    if (!(ctx->flags & HAS_KEY)) { return 0; }"
+  ; "    u8 real_tag[64]; // actually 16 useful bytes"
+  ; "    kex_extra_hash(ctx, real_tag);"
+  ; "    if (crypto_verify16(tag, real_tag)) {"
+  ; "        WIPE_CTX(ctx);"
+  ; "        WIPE_BUFFER(real_tag);"
+  ; "        return -1;"
+  ; "    }"
+  ; "    WIPE_BUFFER(real_tag);"
+  ; "    return 0;"
+  ; "}"
+  ; ""
+  ; "static void kex_write_raw(" ^ prefix ^ "ctx *ctx, u8 *msg,"
+  ; "                          const u8 *src, size_t size)"
+  ; "{"
+  ; "    copy(msg, src, size);"
+  ; "    kex_mix_hash(ctx, msg, size);"
+  ; "}"
+  ; ""
+  ; "static void kex_read_raw(" ^ prefix ^ "ctx *ctx, u8 *dest,"
+  ; "                         const u8 *msg, size_t size)"
+  ; "{"
+  ; "    kex_mix_hash(ctx, msg, size);"
+  ; "    copy(dest, msg, size);"
+  ; "}"
+  ; ""
+  ; "static void kex_write(" ^
+      prefix ^ "ctx *ctx, u8 *msg, const u8 *src, size_t size)"
+  ; "{"
+  ; "    if (!(ctx->flags & HAS_KEY)) {"
+  ; "        kex_write_raw(ctx, msg, src, size);"
+  ; "        return;"
+  ; "    }"
+  ; "    // we have a key, we encrypt"
+  ; "    u8 key[64]; // actually 32 useful bytes"
+  ; "    kex_extra_hash(ctx, key);"
+  ; "    encrypt(msg, src, size, key);"
+  ; "    kex_mix_hash(ctx, msg, size);"
+  ; "    kex_auth(ctx, msg + size);"
+  ; "    WIPE_BUFFER(key);"
+  ; "}"
+  ; ""
+  ; "static int kex_read(" ^
+      prefix ^ "ctx *ctx, u8 *dest, const u8 *msg, size_t size)"
+  ; "{"
+  ; "    if (!(ctx->flags & HAS_KEY)) {"
+  ; "        kex_read_raw(ctx, dest, msg, size);"
+  ; "        return 0;"
+  ; "    }"
+  ; "    // we have a key, we decrypt"
+  ; "    u8 key[64]; // actually 32 useful bytes"
+  ; "    kex_extra_hash(ctx, key);"
+  ; "    kex_mix_hash(ctx, msg, size);"
+  ; "    if (kex_verify(ctx, msg + size)) {"
+  ; "        WIPE_BUFFER(key);"
+  ; "        return -1;"
+  ; "    }"
+  ; "    encrypt(dest, msg, size, key);"
+  ; "    WIPE_BUFFER(key);"
+  ; "    return 0;"
+  ; "}"
+  ; ""
+  ; "static unsigned kex_next_token(" ^ prefix ^ "ctx *ctx)"
+  ; "{"
+  ; "    unsigned token = ctx->messages[0] & 7;"
+  ; "    ctx->messages[0] >>= 3;"
+  ; "    return token;"
+  ; "}"
+  ; ""
+  ; "static void kex_next_message(" ^ prefix ^ "ctx *ctx)"
+  ; "{"
+  ; "    FOR (i, 0, 3) {"
+  ; "        ctx->messages[i] = ctx->messages[i+1];"
+  ; "    }"
+  ; "    ctx->messages[3] = 0;"
+  ; "}"
+  ; ""
+  ; "//////////////////////"
+  ; "/// Initialisation ///"
+  ; "//////////////////////"
+  ; "static void kex_init(" ^ prefix ^ "ctx *ctx, const u8 pid[32])"
+  ; "{"
+  ; "    copy(ctx->hash, pid, 64);"
+  ; "    ctx->flags = IS_OK;"
+  ; "}"
+  ; ""
+  ; "static void kex_seed(" ^ prefix ^ "ctx *ctx, u8 random_seed[32])"
+  ; "{"
+  ; "    copy(ctx->e, random_seed, 32);"
+  ; "    crypto_wipe(random_seed, 32); // auto wipe seed to avoid reuse"
+  ; "    crypto_x25519_public_key(ctx->ep, ctx->e);"
+  ; "}"
+  ; ""
+  ; "static void kex_locals(" ^
+      prefix ^ "ctx *ctx, const u8 s[32], const u8 sp[32])"
+  ; "{"
+  ; "    if (sp == 0) { crypto_x25519_public_key(ctx->sp, s);      }"
+  ; "    else         { copy                    (ctx->sp, sp, 32); }"
+  ; "    copy(ctx->s, s, 32);"
+  ; "}"
+  ; ""
+  ; "//////////////////////"
+  ; "/// Send & receive ///"
+  ; "//////////////////////"
+  ; "int "^prefix^"read ("^prefix^"ctx *ctx, const u8 *m, size_t m_size)"
+  ; "{"
+  ; "    return "^prefix^"read_p(ctx, 0, 0, m, m_size);"
+  ; "}"
+  ; ""
+  ; "void "^prefix^"write("^prefix^"ctx *ctx, u8 *m, size_t m_size)"
+  ; "{"
+  ; "    "^prefix^"write_p(ctx, m, m_size, 0, 0);"
+  ; "}"
+  ; ""
+  ; prototype "int" (prefix ^ "read_p")
+      [ [ prefix ^ "ctx "; "*"; "ctx"              ]
+      ; [ "u8 "          ; "*"; "p, size_t p_size" ]
+      ; [ "const u8 "    ; "*"; "m, size_t m_size" ]
+      ]
+  ; "{"
+  ; "    // Do nothing & fail if we should not receive"
+  ; "    size_t min_size;"
+  ; "    if ("^prefix^"next_action(ctx, &min_size) != "^prefix_caps^"READ ||"
+  ; "        m_size < min_size + p_size) {"
+  ; "        WIPE_CTX(ctx);"
+  ; "        return -1;"
+  ; "    }"
+  ; "    // Next time, we'll send"
+  ; "    ctx->flags |= SHOULD_SEND;"
+  ; ""
+  ; "    // receive core message"
+  ; "    while (ctx->messages[0] != 0) { // message not yet empty"
+  ; "        size_t tag_size = ctx->flags & HAS_KEY ? 16 : 0;"
+  ; "        switch (kex_next_token(ctx)) {"
+  ; "        case E : kex_read_raw(ctx, ctx->er, m, 32);  m += 32;  break;"
+  ; "        case S : if (kex_read(ctx, ctx->sr, m, 32)) { return -1; }"
+  ; "                 m += 32 + tag_size;"
+  ; "                 ctx->flags |= HAS_REMOTE;                     break;"
+  ; "        case EE: kex_update_key(ctx, ctx->e, ctx->er);         break;"
+  ; "        case ES: kex_update_key(ctx, ctx->e, ctx->sr);         break;"
+  ; "        case SE: kex_update_key(ctx, ctx->s, ctx->er);         break;"
+  ; "        case SS: kex_update_key(ctx, ctx->s, ctx->sr);         break;"
+  ; "        default:; // never happens"
+  ; "        }"
+  ; "    }"
+  ; "    kex_next_message(ctx);"
+  ; ""
+  ; "    // Read payload, if any"
+  ; "    if (p != 0) { if (kex_read(ctx, p, m, p_size)) { return -1; } }"
+  ; "    else        { if (kex_verify(ctx, m)         ) { return -1; } }"
+  ; "    return 0;"
+  ; "}"
+  ; ""
+  ; prototype "void" (prefix ^ "write_p")
+      [ [ prefix ^ "ctx "; "*"; "ctx"              ]
+      ; [ "u8 "          ; "*"; "m, size_t m_size" ]
+      ; [ "const u8 "    ; "*"; "p, size_t p_size" ]
+      ]
+  ; "{"
+  ; "    // Fail if we should not send (the failure is alas delayed)"
+  ; "    size_t min_size;"
+  ; "    if ("^prefix^"next_action(ctx, &min_size) != "^prefix_caps^"WRITE ||"
+  ; "        m_size < min_size + p_size) {"
+  ; "        WIPE_CTX(ctx);"
+  ; "        return;"
+  ; "    }"
+  ; "    // Next time, we'll receive"
+  ; "    ctx->flags &= ~SHOULD_SEND;"
+  ; ""
+  ; "    // Send core message"
+  ; "    while (ctx->messages[0] != 0) { // message not yet empty"
+  ; "        size_t tag_size = ctx->flags & HAS_KEY ? 16 : 0;"
+  ; "        switch (kex_next_token(ctx)) {"
+  ; "        case E : kex_write_raw (ctx, m, ctx->ep, 32); m += 32;            "
+    ^                                                                   "break;"
+  ; "        case S : kex_write     (ctx, m, ctx->sp, 32); m += 32 + tag_size; "
+    ^                                                                   "break;"
+  ; "        case EE: kex_update_key(ctx, ctx->e, ctx->er);                    "
+    ^                                                                   "break;"
+  ; "        case ES: kex_update_key(ctx, ctx->e, ctx->sr);                    "
+    ^                                                                   "break;"
+  ; "        case SE: kex_update_key(ctx, ctx->s, ctx->er);                    "
+    ^                                                                   "break;"
+  ; "        case SS: kex_update_key(ctx, ctx->s, ctx->sr);                    "
+    ^                                                                   "break;"
+  ; "        default:; // never happens"
+  ; "        }"
+  ; "    }"
+  ; "    kex_next_message(ctx);"
+  ; ""
+  ; "    // Write payload, if any"
+  ; "    size_t tag_size = ctx->flags & HAS_KEY ? 16 : 0;"
+  ; "    if (p != 0) { kex_write(ctx, m, p, p_size); m += tag_size + p_size; }"
+  ; "    else        { kex_auth (ctx, m);            m += tag_size;          }"
+  ; ""
+  ; "    // Pad"
+  ; "    FOR (i, 0, m_size - min_size - p_size) {"
+  ; "        m[i] = 0;"
+  ; "    }"
+  ; "}"
+  ; ""
+  ; "///////////////"
+  ; "/// Outputs ///"
+  ; "///////////////"
+  ; "void " ^ prefix ^ "remote_key(" ^ prefix ^ "ctx *ctx, u8 key[32])"
+  ; "{"
+  ; "    if (!(ctx->flags & HAS_REMOTE)) {"
+  ; "        WIPE_CTX(ctx);"
+  ; "        return;"
+  ; "    }"
+  ; "    copy(key, ctx->sr, 32);"
+  ; "    ctx->flags &= ~GETS_REMOTE;"
+  ; "}"
+  ; ""
+  ; "void " ^ prefix ^ "final(" ^ prefix ^ "ctx *ctx, u8 key[32], u8 extra[32])"
+  ; "{"
+  ; "    if (" ^ prefix ^ "next_action(ctx, 0) == " ^ prefix_caps ^ "FINAL) {"
+  ; "        copy(key, ctx->hash, 32);"
+  ; "        if (extra != 0) {"
+  ; "            copy(extra, ctx->hash + 32, 32);"
+  ; "        }"
+  ; "    }"
+  ; "    WIPE_CTX(ctx);"
+  ; "}"
+  ; ""
+  ; "///////////////////"
+  ; "/// Next action ///"
+  ; "///////////////////"
+  ; prototype (prefix ^ "action") (prefix ^ "next_action")
+      [ [ "const " ^ prefix ^ "ctx *ctx" ]
+      ; [ "size_t *next_message_size"    ]
+      ]
+  ; "{"
+  ; "    // Next message size (if any)"
+  ; "    if (next_message_size) {"
+  ; "        unsigned has_key = ctx->flags & HAS_KEY ? 16 : 0;"
+  ; "        uint16_t message = ctx->messages[0];"
+  ; "        size_t   size    = 0;"
+  ; "        while (message != 0) {"
+  ; "            if (is_exchange(message & 7)) { has_key = 16;         }"
+  ; "            if (is_key     (message & 7)) { size += 32 + has_key; }"
+  ; "            message >>= 3;"
+  ; "        }"
+  ; "        *next_message_size = size + has_key;"
+  ; "    }"
+  ; "    // Next action"
+  ; "    int should_get_remote ="
+  ; "        (ctx->flags & HAS_REMOTE) &&"
+  ; "        (ctx->flags & GETS_REMOTE);"
+  ; "    return !(ctx->flags & IS_OK)    ? " ^ prefix_caps ^ "NONE"
+  ; "        :  should_get_remote        ? " ^ prefix_caps ^ "REMOTE_KEY"
+  ; "        :  ctx->messages[0] == 0    ? " ^ prefix_caps ^ "FINAL"
+  ; "        :  ctx->flags & SHOULD_SEND ? " ^ prefix_caps ^ "WRITE"
+  ; "        :                             " ^ prefix_caps ^ "READ;"
+  ; "}"
+  ; ""
+  ]
 
 let print_lines channel lines =
   List.iter (fun line -> output_string channel (line ^ "\n")) lines
 
-(* Common source code *)
-let print_header_prefix channel =
-  print_lines channel
-    [ "#include <inttypes.h>"
-    ; "#include <stddef.h>"
-    ; ""
-    ; "typedef struct {"
-    ; "    uint8_t transcript[128];"
-    ; "    uint8_t keys      [128];"
-    ; "    uint8_t local_sk   [32];"
-    ; "    uint8_t local_pk   [32];"
-    ; "    uint8_t local_ske  [32];"
-    ; "    uint8_t local_pke  [32];"
-    ; "    uint8_t remote_pk  [32];"
-    ; "    uint8_t remote_pke [32];"
-    ; "    uint8_t pid        [16];"
-    ; "    size_t  transcript_size;"
-    ; "} " ^ prefix ^ "ctx;"
-    ; ""
-    ; "typedef struct { " ^ prefix ^ "ctx ctx; } " ^ prefix ^ "client_ctx;"
-    ; "typedef struct { " ^ prefix ^ "ctx ctx; } " ^ prefix ^ "server_ctx;"
-    ; ""
-    ]
-
-let print_source_prefix channel =
-  print_lines channel
-    [ "#include <monocypher.h>"
-    ; "#include \"monokex.h\""
-    ; ""
-    ; "#define WIPE_CTX(ctx)        crypto_wipe(ctx   , sizeof(*(ctx)))"
-    ; "#define WIPE_BUFFER(buffer)  crypto_wipe(buffer, sizeof(buffer))"
-    ; ""
-    ; "static const uint8_t zero[32] = {0};"
-    ; "static const uint8_t one [16] = {1};"
-    ; ""
-    ; "static void copy16(uint8_t out[16], const uint8_t in[16])"
-    ; "{"
-    ; "    for (size_t i = 0; i < 16; i++) { out[i]  = in[i]; }"
-    ; "}"
-    ; "static void copy32(uint8_t out[32], const uint8_t in[32])"
-    ; "{"
-    ; "    for (size_t i = 0; i < 32; i++) { out[i]  = in[i]; }"
-    ; "}"
-    ; "static void xor32 (uint8_t out[32], const uint8_t in[32])"
-    ; "{"
-    ; "    for (size_t i = 0; i < 32; i++) { out[i] ^= in[i]; }"
-    ; "}"
-    ; ""
-    ; prototype
-        "static void" "kex_update_key"
-        [ [prefix ^ "ctx " ; "*"; "ctx"           ]
-        ; ["const uint8_t "; "" ; "secret_key[32]"]
-        ; ["const uint8_t "; "" ; "public_key[32]"]
-        ]
-    ; "{"
-    ; "    // Extract"
-    ; "    uint8_t tmp[32];"
-    ; "    crypto_x25519(tmp, secret_key, public_key);"
-    ; "    crypto_chacha20_H(tmp, tmp, zero);"
-    ; "    xor32(tmp, ctx->keys);"
-    ; "    crypto_chacha20_H(tmp, tmp, ctx->pid);"
-    ; ""
-    ; "    // Expand"
-    ; "    crypto_chacha_ctx chacha_ctx;"
-    ; "    crypto_chacha20_init  (&chacha_ctx, tmp, one);"
-    ; "    crypto_chacha20_stream(&chacha_ctx, ctx->keys, 128);"
-    ; ""
-    ; "    // Clean up"
-    ; "    WIPE_BUFFER(tmp);"
-    ; "    WIPE_CTX(&chacha_ctx);"
-    ; "}"
-    ; ""
-    ; "static void kex_auth(" ^ prefix ^ "ctx *ctx, uint8_t mac[16])"
-    ; "{"
-    ; "    crypto_poly1305(mac, ctx->transcript, ctx->transcript_size,"
-    ; "                    ctx->keys + 32);"
-    ; "}"
-    ; ""
-    ; "static int kex_verify(" ^ prefix ^ "ctx *ctx, const uint8_t mac[16])"
-    ; "{"
-    ; "    uint8_t real_mac[16];"
-    ; "    kex_auth(ctx, real_mac);"
-    ; "    int mismatch = crypto_verify16(real_mac, mac);"
-    ; "    if (mismatch) {  WIPE_CTX(ctx); }"
-    ; "    WIPE_BUFFER(real_mac);"
-    ; "    return mismatch;"
-    ; "}"
-    ; ""
-    ; "static void kex_send(" ^ prefix ^ "ctx *ctx,"
-    ; "                     uint8_t msg[32], const uint8_t src[32])"
-    ; "{"
-    ; "    // Send message, encrypted if we have a key"
-    ; "    copy32(msg, src);"
-    ; "    xor32(msg, ctx->keys + 64);"
-    ; "    // Record sent message"
-    ; "    copy32(ctx->transcript + ctx->transcript_size, msg);"
-    ; "    ctx->transcript_size += 32;"
-    ; "}"
-    ; ""
-    ; "static void kex_receive(" ^ prefix ^ "ctx *ctx,"
-    ; "                        uint8_t dest[32], const uint8_t msg[32])"
-    ; "{"
-    ; "    // Record incoming message"
-    ; "    copy32(ctx->transcript + ctx->transcript_size, msg);"
-    ; "    ctx->transcript_size += 32;"
-    ; "    // Receive message, decrypted it if we have a key"
-    ; "    copy32(dest, msg);"
-    ; "    xor32(dest, ctx->keys + 64);"
-    ; "}"
-    ; ""
-    ; "static void kex_init(" ^ prefix ^ "ctx *ctx, const uint8_t pid[16])"
-    ; "{"
-    ; "    copy32(ctx->keys     , zero); // first chaining key"
-    ; "    copy32(ctx->keys + 64, zero); // first encryption key"
-    ; "    copy16(ctx->pid      , pid);  // protocol id"
-    ; "    ctx->transcript_size = 0;     // transcript starts empty"
-    ; "}"
-    ; ""
-    ; "static void kex_seed(" ^ prefix ^ "ctx *ctx, uint8_t random_seed[32])"
-    ; "{"
-    ; "    copy32(ctx->local_ske, random_seed);"
-    ; "    crypto_wipe(random_seed, 32); // auto wipe seed to avoid reuse"
-    ; "    crypto_x25519_public_key(ctx->local_pke, ctx->local_ske);"
-    ; "}"
-    ; ""
-    ; prototype
-        "static void" "kex_locals"
-        [ [prefix ^ "ctx " ; "*"; "ctx"         ]
-        ; ["const uint8_t "; "" ; "local_sk[32]"]
-        ; ["const uint8_t "; "" ; "local_pk[32]"]
-        ]
-    ; "{"
-    ;"    if (local_pk == 0) crypto_x25519_public_key(ctx->local_pk, local_sk);"
-    ;"    else               copy32                  (ctx->local_pk, local_pk);"
-    ; "    copy32(ctx->local_sk, local_sk);"
-    ; "}"
-    ; ""
-    ]
+let print_header_prefix channel = print_lines channel header_prefix
+let print_source_prefix channel = print_lines channel source_prefix
 
 (* Specific source code *)
 let block_comment comment =
@@ -407,28 +601,18 @@ let print_header_pattern channel pattern p =
   let lower_pattern = String.lowercase_ascii pattern in
   print_lines channel
     [ block_comment pattern
+    ; ""
     ; init_header lower_pattern Client p
     ; init_header lower_pattern Server p
-    ];
-  let nb_messages = List.length (snd p) in
-  for i = 1 to nb_messages + 1 do
-    output_string channel (message_header false lower_pattern p i ^ "\n");
-    output_string channel (message_header true  lower_pattern p i ^ "\n");
-  done
+    ]
 
 let print_source_pattern channel pattern p =
   let lower_pattern = String.lowercase_ascii pattern in
   print_lines channel
     [ block_comment pattern
-    ; "static const uint8_t pid_" ^ lower_pattern
-      ^ "[16] = \"Monokex "       ^ pattern ^ "\";"
+    ; "static const u8 pid_" ^ lower_pattern
+      ^ "[64] = \"Monokex "       ^ pattern ^ "\";"
     ; ""
     ; init_source pattern Client p
     ; init_source pattern Server p
-    ];
-  let messages    = snd p                in
-  let nb_messages = List.length messages in
-  for i = 1 to nb_messages + 1 do
-    output_string channel (message_source false lower_pattern p i ^ "\n");
-    output_string channel (message_source true  lower_pattern p i ^ "\n");
-  done
+    ]
