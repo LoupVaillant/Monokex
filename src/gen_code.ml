@@ -262,7 +262,7 @@ let source_prefix =
   ; ""
   ; "typedef uint8_t u8;"
   ; ""
-  ; "// memcmp clone"
+  ; "// memcpy clone"
   ; "static void copy(u8 *out, const u8 *in, size_t nb)"
   ; "{"
   ; "    FOR(i, 0, nb) out[i] = in[i];"
