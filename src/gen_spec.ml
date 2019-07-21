@@ -20,73 +20,113 @@ let secrets p =
       | (P.E, P.E) -> "- __ee__ = X25519(ie, RE) = X25519(re, IE)\n")
   |> String.concat ""
 
-let all_keys : P.protocol -> string = fun p ->
-  let exchanges = Proto.all_exchanges p /@ P.string_of_exchange in
-  let currents  = range 1 (List.length exchanges)             in
-  map2 (fun e c -> let current  = string_of_int c       in
-                   let previous = string_of_int (c - 1) in
-                   "- __CK"       ^ current
-                   ^ ", AK"       ^ current
-                   ^ ", EK"       ^ current
-                   ^ ", PK"       ^ current
-                   ^ ":__ XCKDF(" ^ e
-                   ^ ", "         ^ (if c = 1
-                                     then "zero"
-                                     else "CK" ^ previous ^ " ")
-                   ^ ", pid)\n"
-    ) exchanges currents
-  |> String.concat ""
+type state = { hash_nb  : int  (* last    hash    number *)
+             ; tag_nb   : int  (* last    tag     number *)
+             ; key_nb   : int  (* last    key     number *)
+             ; msg_nb   : int  (* current message number *)
+             ; hashes   : string
+             ; messages : string list list
+             ; curr_msg : string list
+             ; has_key  : bool
+             }
 
-let encrypted_keys : P.protocol -> string = fun p ->
-  let actions   = snd (P.cs_protocol p) |> List.concat in
-  let shifted   = List.tl actions                      in
-  let keys      = zip actions shifted
-                  // (fst |- P.is_cs_exchange)
-                  |> mapi 1 (fun i -> function
-                         | _, P.CS_exchange _ -> ""
-                         | _, P.CS_key      k -> let s = string_of_int i   in
-                                                 let x = P.string_of_key k in
-                                                 "    X" ^ x ^ "  = "
-                                                 ^ x ^ " XOR EK" ^ s ^ "\n") in
-  if keys = []
-  then ""
-  else String.concat "" keys ^ "\n"
+let prev_hash st = "H" ^ string_of_int (st.hash_nb - 1)
+let curr_hash st = "H" ^ string_of_int st.hash_nb
+let curr_tag  st = "T" ^ string_of_int st.tag_nb
+let curr_key  st = "K" ^ string_of_int st.key_nb
+let curr_msg  st =       string_of_int st.msg_nb
+
+let inc_hash  st = { st with hash_nb = st.hash_nb + 1 }
+let inc_tag   st = { st with tag_nb  = st.tag_nb  + 1 }
+let inc_key   st = { st with key_nb  = st.key_nb  + 1 }
+let inc_msg   st = { st with msg_nb  = st.msg_nb  + 1 }
+
+let hash_expr prev input = "Blake2b(" ^ prev ^ " || " ^ input ^ ")"
+
+let message_bit input st = { st with curr_msg = st.curr_msg @ [input] }
+
+let mix_hash prev curr input st =
+  { st with hashes = st.hashes^"- __"^curr^"__ = "^hash_expr prev input^"\n" }
+
+let add_hash input =
+  inc_hash |- fun st -> mix_hash (prev_hash st) (curr_hash st) input st
+
+let if_keyed f st = if not st.has_key then st else f st
+
+let add_tag =
+  if_keyed (add_hash "zero"
+            |- inc_tag
+            |- (fun st -> mix_hash (prev_hash st) (curr_tag st) "one" st))
+let add_key =
+  if_keyed (add_hash "zero"
+            |- inc_key
+            |- (fun st -> mix_hash (prev_hash st) (curr_key st) "one" st))
+
+let maybe_hash condition input =
+  inc_hash
+  |- (fun st -> let line =  "- __"    ^ curr_hash st
+                            ^ "__ = " ^ hash_expr (prev_hash st) input
+                            ^ " if "  ^ condition
+                            ^ ", "    ^ prev_hash st ^ " otherwise\n"
+                in { st with hashes = st.hashes ^ line })
+
+let next_key st k =
+  let k_str = P.string_of_key k in
+  if P.is_ephemeral k || not st.has_key
+  then st |> message_bit k_str |> add_hash k_str
+  else let st1 = add_key st                                      in
+       let enc_key = "Chacha20("^ curr_key st1 ^", "^ k_str ^")" in
+       st1
+       |> add_hash enc_key |>            message_bit enc_key
+       |> add_tag          |> (fun st -> message_bit (curr_tag st) st)
+
+let next_exchange st e =
+  add_hash (P.string_of_exchange e) { st with has_key = true }
+
+let add_message st msg =
+  List.fold_left
+    (fun st action -> P.map_cs_action (next_key st) (next_exchange st) action)
+    (inc_msg st)
+    msg
+  |> maybe_hash ("msg"^ curr_msg st ^" has a payload") ("p" ^ curr_msg st)
+  |> add_tag
+  |> (fun st -> { st with curr_msg = st.curr_msg @ ["p" ^ curr_msg st] })
+  |> (fun st -> if_keyed (message_bit (curr_tag st)) st)
+  |> (fun st -> { st with messages = st.messages @ [st.curr_msg]
+                        ; curr_msg = [] })
+
+let add_pre_message st msg =
+  List.fold_left
+    (fun st action -> P.map_cs_action
+                        (next_key st) (* static, not encrypted *)
+                        (f_error "add_pre_message")
+                        action)
+    st msg
+
+let state_of_protocol p =
+  let pre_messages = p |> P.cs_protocol |> fst in
+  let messages     = p |> P.cs_protocol |> snd in
+  { hash_nb  = 0
+  ; tag_nb   = 0
+  ; key_nb   = 0
+  ; msg_nb   = 0
+  ; hashes   = ""
+  ; messages = []
+  ; curr_msg = []
+  ; has_key  = false
+  }
+  |> swap (List.fold_left add_pre_message) pre_messages
+  |> maybe_hash "there is a prelude" "prelude"
+  |> swap (List.fold_left add_message) messages
+
+let all_keys : P.protocol -> string = fun p -> (state_of_protocol p).hashes
 
 let messages : P.protocol -> string = fun p ->
-  let rec key ex = function
-    | []             -> []
-    | P.CS_exchange e :: keys -> key (ex + 1) keys
-    | P.CS_key      k :: keys -> let x = if ex > 0 then "X" else "" in
-                                 (x ^ P.string_of_key k) :: key ex keys       in
-  let rec msg ex = function
-    | []            -> []
-    | m :: messages -> let nex = ex + (m // P.is_cs_exchange |> List.length) in
-                       (String.concat " || " (key ex m)) :: msg nex messages  in
-  let rec auth ex tr = function
-    | []            -> []
-    | m :: messages ->
-       let nex = ex + (m // P.is_cs_exchange |> List.length) in
-       let ntr = tr @ key ex m                               in
-       (if nex = 0 || ntr = []
-        then ""
-        else (if (m // P.is_cs_key |> (=) [])
-              then "    Poly1305(AK"
-              else " || Poly1305(AK")
-             ^ string_of_int nex ^ ", "
-             ^ String.concat " || " ntr ^ ")"
-       ) :: auth nex ntr messages                                             in
-  let m  = P.cs_protocol p |> snd
-           |> msg 0
-           |> mapi 1 (fun i m -> "msg" ^ string_of_int i ^ " = " ^ m)
-           |> pad_right                                                       in
-  let a  = P.cs_protocol p |> snd
-           |> (auth 0 ((P.cs_protocol p |> fst |> List.concat)
-                       // P.is_cs_key /@ P.to_cs_key /@ P.string_of_key))     in
-  zip_with
-    (fun m a -> "    "
-                ^ (if a = "" then String.trim m else m ^ a)
-                ^ "\n")
-    m a
+  mapi 1
+    (fun n msg ->
+      let msg_nb = string_of_int n in
+      "- __msg" ^ msg_nb ^ "__ = " ^ String.concat " || " msg ^ "\n")
+    (state_of_protocol p).messages
   |> String.concat ""
 
 let pre_shared : P.protocol -> string = fun p ->
@@ -117,30 +157,12 @@ let amplified_messages p =
           ^ ". Pad " ^ messages ^ " with zeroes as necessary\n\n"
           |> paragraph
 
-let rec first_client_payload =
-  let uses_ephemeral msg = List.exists
-                             (fst |- (=) Proto.E)
-                             (Proto.get_cs_exchanges msg) in
-  function
-  | []               -> 1
-  | msg :: []        -> if uses_ephemeral msg then 1 else 2
-  | msg :: _ :: msgs -> if uses_ephemeral msg then 1 else
-                          2 + first_client_payload msgs
-
-let first_server_payload = function
-  | []        -> 1
-  | _ :: msgs -> first_client_payload msgs
-
 let handshake : P.protocol -> string = fun p ->
   let send sender receiver msg_num =
     "- The "          ^ sender
     ^ " sends msg"    ^ string_of_int msg_num
     ^ " to the "      ^ receiver
     ^ ".\n"                                      in
-  let payload sender receiver payload_num =
-    "- The "        ^ sender
-    ^ " may use PK" ^ string_of_int payload_num
-    ^ " to send an encrypted payload.\n"         in
   let receive ex receiver msg_num =
     if ex
     then "- The "          ^ receiver
@@ -153,14 +175,11 @@ let handshake : P.protocol -> string = fun p ->
     "- The "          ^ receiver
     ^ " checks the "  ^ sender
     ^ "'s static key, and aborts if it fails.\n" in
-  let rec messages sender receiver sender_p receiver_p msg_num ex = function
+  let rec messages sender receiver msg_num ex = function
     | []      -> ""
     | m :: ms -> let nex    = ex + (m // P.is_cs_exchange |> List.length) in
                  let did_ex = nex > 0                                     in
                  send sender receiver msg_num
-                 ^ (if msg_num >= sender_p && ms <> []
-                    then payload sender receiver nex
-                    else "")
                  ^ receive did_ex receiver msg_num
                  ^ (if List.exists (swap List.mem [P.CS_key P.IS;
                                                    P.CS_key P.RS]) m
@@ -168,56 +187,12 @@ let handshake : P.protocol -> string = fun p ->
                     else "")
                  ^ messages
                      receiver sender
-                     receiver_p sender_p
                      (msg_num + 1) nex ms        in
   let msgs = snd (P.cs_protocol p)               in
-  (messages
-     "initiator" "respondent"
-     (first_client_payload msgs)
-     (first_server_payload msgs)
-     1 0 msgs)
-  ^ "- The protocol is complete.  The session key is PK"
-  ^ (P.all_exchanges p
-     |> List.length
-     |> string_of_int)
+  (messages "initiator" "respondent" 1 0 msgs)
+  ^ "- The protocol is complete.  The session keys are the two halves of "
+  ^ curr_hash (state_of_protocol p)
   ^ ".\n"
-
-let print_xckdf : out_channel -> unit =
-  fun channel ->
-  let ps s = output_string channel s in
-  let pe s = ps s; ps "\n"           in
-  pe "XCKDF";
-  pe "=====";
-  pe "";
-  pe "This is a Chacha20 based key derivation for X25519 shared secrets.";
-  pe "";
-  pe "The inputs are:";
-  pe "";
-  pe "- __DH:__   X25519 key exchange        (32 bytes)";
-  pe "- __IK:__   Input key material         (32 bytes)";
-  pe "- __salt:__ Protocol specific constant (16 bytes)";
-  pe "";
-  pe "The output of __XCKDF(DH, IK, salt)__ is a 128 byte buffer, defined as";
-  pe "follows:";
-  pe "";
-  pe "- __H:__   HChacha20(DH, zero)";
-  pe "- __X:__   H XOR prev";
-  pe "- __I:__   HChacha20(X, salt)";
-  pe "- __out:__ Chacha20(I, one)[0:127]";
-  pe "";
-  pe "_(\"[x:y]\" denotes a range; one is encoded in little endian.)_";
-  pe "";
-  pe "That output is divided among four 32-byte keys:";
-  pe "";
-  pe "- __K1:__ out[0 : 31]";
-  pe "- __K2:__ out[32: 63]";
-  pe "- __K3:__ out[64: 95]";
-  pe "- __K4:__ out[96:127]";
-  pe "";
-  pe "We note: __K1, K2, K3, K4 = XCKDF(DH, IK, salt)__";
-  pe "";
-  pe "";
-  ()
 
 let print : out_channel -> string -> P.protocol -> unit =
   fun channel pattern p ->
@@ -235,14 +210,14 @@ let print : out_channel -> string -> P.protocol -> unit =
   pe "";
   ps (secrets p);
   pe "";
-  pe "Those shared secrets are hashed to derive the following keys:";
+  pe "Those shared secrets are hashed to derive the following keys";
+  pe "(`||`denotes concatenation, zero and one are one byte numbers):";
   pe "";
-  pe ("- __pid:__ \"Monokex " ^ pattern ^ "\"  (ASCII, 16 bytes, zero padded)");
-  ps (all_keys          p);
+  pe ("- __H0__ = \"Monokex " ^ pattern ^ "\"  (ASCII, 64 bytes, zero padded)");
+  ps (all_keys p);
   pe "";
-  pe "The messages contain the following (`||` denotes concatenation):";
+  pe "The messages contain the following (the payloads \"p*\" are optional):";
   pe "";
-  ps (encrypted_keys p);
   ps (messages p);
   pe "";
   ps (pre_shared p);

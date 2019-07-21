@@ -27,8 +27,8 @@ val is_key        : action    -> bool
 val is_exchange   : action    -> bool
 val is_cs_key     : cs_action -> bool
 val is_cs_exchange: cs_action -> bool
-val is_ephemeral  : key       -> bool
-val is_static     : key       -> bool
+val is_ephemeral  : cs_key    -> bool
+val is_static     : cs_key    -> bool
 
 val to_messages   : protocol  -> message list
 val to_actions    : message   -> action list

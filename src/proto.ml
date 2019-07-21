@@ -49,14 +49,14 @@ let is_key         = map_action    (const true ) (const false)
 let is_exchange    = map_action    (const false) (const true )
 let is_cs_key      = map_cs_action (const true ) (const false)
 let is_cs_exchange = map_cs_action (const false) (const true )
-let is_ephemeral   = map_key       true  false
-let is_static      = map_key       false true
+let is_ephemeral   = function IE | RE -> true  | IS | RS -> false
+let is_static      = function IE | RE -> false | IS | RS -> true
 
 let to_messages p  = fst p @ snd p
 let to_actions     = map_message   id id
 let to_key         = map_action    id (f_error "to_key")
 let to_exchange    = map_action    (f_error "to_exchange") id
-let to_cs_key      = map_cs_action id (f_error "to_key")
+let to_cs_key      = map_cs_action id (f_error "to_cs_key")
 let to_cs_exchange = map_cs_action (f_error "to_exchange") id
 
 let get_keys            message  = message  // is_key         /@ to_key

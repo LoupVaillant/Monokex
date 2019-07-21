@@ -31,7 +31,6 @@ let _ =
   if protocols = [] then panic "There is no protocol to generate!";
   if errors   <> [] then panic ("\n" ^ String.concat "\n" errors ^ "\n");
 
-  Gen_spec.print_xckdf spec;
   iter_pair (Gen_spec.print spec) protocols;
 
   Gen_code.print_header_prefix header;
