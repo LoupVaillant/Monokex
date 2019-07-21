@@ -1,5 +1,6 @@
 open Utils
 module P = Proto
+module L = Proto_log
 
 (* Convert protocol to specs *)
 let keys : P.protocol -> string = fun p ->
@@ -20,114 +21,65 @@ let secrets p =
       | (P.E, P.E) -> "- __ee__ = X25519(ie, RE) = X25519(re, IE)\n")
   |> String.concat ""
 
-type state = { hash_nb  : int  (* last    hash    number *)
-             ; tag_nb   : int  (* last    tag     number *)
-             ; key_nb   : int  (* last    key     number *)
-             ; msg_nb   : int  (* current message number *)
-             ; hashes   : string
-             ; messages : string list list
-             ; curr_msg : string list
-             ; has_key  : bool
-             }
+let string_of_hash = function
+  | L.Hash i -> "H" ^ string_of_int i
+  | L.Htag i -> "T" ^ string_of_int i
+  | L.Hkey i -> "K" ^ string_of_int i
 
-let prev_hash st = "H" ^ string_of_int (st.hash_nb - 1)
-let curr_hash st = "H" ^ string_of_int st.hash_nb
-let curr_tag  st = "T" ^ string_of_int st.tag_nb
-let curr_key  st = "K" ^ string_of_int st.key_nb
-let curr_msg  st =       string_of_int st.msg_nb
+let string_of_raw_input = function
+  | L.Prelude    -> "prelude"
+  | L.Payload  i -> "p" ^ string_of_int i
+  | L.Exchange e -> P.string_of_exchange e
+  | L.Key      k -> P.string_of_key      k
 
-let inc_hash  st = { st with hash_nb = st.hash_nb + 1 }
-let inc_tag   st = { st with tag_nb  = st.tag_nb  + 1 }
-let inc_key   st = { st with key_nb  = st.key_nb  + 1 }
-let inc_msg   st = { st with msg_nb  = st.msg_nb  + 1 }
+let string_of_input = function
+  | L.Iraw     raw  -> string_of_raw_input raw
+  | L.Ienc (i, raw) -> "Chacha20(K" ^ string_of_int i
+                       ^ ", " ^ string_of_raw_input raw ^ ")"
+  | L.Itag  i       -> "T" ^ string_of_int i
+  | L.Zero          -> "zero"
+  | L.One           -> "one"
 
-let hash_expr prev input = "Blake2b(" ^ prev ^ " || " ^ input ^ ")"
+let grid_left_of_mix ((hash, _, _) : L.mix) =
+  "- __" ^ string_of_hash hash ^ "__"
 
-let message_bit input st = { st with curr_msg = st.curr_msg @ [input] }
+let grid_right_of_mix ((_, prev, input) : L.mix) =
+  let finish     = ", H" ^ string_of_int prev ^ " otherwise"               in
+  let prelude    = " if there is a prelude" ^ finish                       in
+  let payload i  = " if msg" ^ string_of_int i ^ " has a payload" ^ finish in
+  let opt_string = match input with
+    | L.Iraw L.Prelude        -> prelude
+    | L.Ienc (k, L.Prelude  ) -> prelude
+    | L.Iraw (   L.Payload i) -> payload i
+    | L.Ienc (k, L.Payload i) -> payload i
+    | _                       -> ""
+  in
+  [ " = Blake2b(H" ^ string_of_int prev
+  ; " || " ^ string_of_input input ^ ")"
+    ^ opt_string
+    ^ "\n"
+  ]
 
-let mix_hash prev curr input st =
-  { st with hashes = st.hashes^"- __"^curr^"__ = "^hash_expr prev input^"\n" }
-
-let add_hash input =
-  inc_hash |- fun st -> mix_hash (prev_hash st) (curr_hash st) input st
-
-let if_keyed f st = if not st.has_key then st else f st
-
-let add_tag =
-  if_keyed (add_hash "zero"
-            |- inc_tag
-            |- (fun st -> mix_hash (prev_hash st) (curr_tag st) "one" st))
-let add_key =
-  if_keyed (add_hash "zero"
-            |- inc_key
-            |- (fun st -> mix_hash (prev_hash st) (curr_key st) "one" st))
-
-let maybe_hash condition input =
-  inc_hash
-  |- (fun st -> let line =  "- __"    ^ curr_hash st
-                            ^ "__ = " ^ hash_expr (prev_hash st) input
-                            ^ " if "  ^ condition
-                            ^ ", "    ^ prev_hash st ^ " otherwise\n"
-                in { st with hashes = st.hashes ^ line })
-
-let next_key st k =
-  let k_str = P.string_of_key k in
-  if P.is_ephemeral k || not st.has_key
-  then st |> message_bit k_str |> add_hash k_str
-  else let st1 = add_key st                                      in
-       let enc_key = "Chacha20("^ curr_key st1 ^", "^ k_str ^")" in
-       st1
-       |> add_hash enc_key |>            message_bit enc_key
-       |> add_tag          |> (fun st -> message_bit (curr_tag st) st)
-
-let next_exchange st e =
-  add_hash (P.string_of_exchange e) { st with has_key = true }
-
-let add_message st msg =
-  List.fold_left
-    (fun st action -> P.map_cs_action (next_key st) (next_exchange st) action)
-    (inc_msg st)
-    msg
-  |> maybe_hash ("msg"^ curr_msg st ^" has a payload") ("p" ^ curr_msg st)
-  |> add_tag
-  |> (fun st -> { st with curr_msg = st.curr_msg @ ["p" ^ curr_msg st] })
-  |> (fun st -> if_keyed (message_bit (curr_tag st)) st)
-  |> (fun st -> { st with messages = st.messages @ [st.curr_msg]
-                        ; curr_msg = [] })
-
-let add_pre_message st msg =
-  List.fold_left
-    (fun st action -> P.map_cs_action
-                        (next_key st) (* static, not encrypted *)
-                        (f_error "add_pre_message")
-                        action)
-    st msg
-
-let state_of_protocol p =
-  let pre_messages = p |> P.cs_protocol |> fst in
-  let messages     = p |> P.cs_protocol |> snd in
-  { hash_nb  = 0
-  ; tag_nb   = 0
-  ; key_nb   = 0
-  ; msg_nb   = 0
-  ; hashes   = ""
-  ; messages = []
-  ; curr_msg = []
-  ; has_key  = false
-  }
-  |> swap (List.fold_left add_pre_message) pre_messages
-  |> maybe_hash "there is a prelude" "prelude"
-  |> swap (List.fold_left add_message) messages
-
-let all_keys : P.protocol -> string = fun p -> (state_of_protocol p).hashes
-
-let messages : P.protocol -> string = fun p ->
-  mapi 1
-    (fun n msg ->
-      let msg_nb = string_of_int n in
-      "- __msg" ^ msg_nb ^ "__ = " ^ String.concat " || " msg ^ "\n")
-    (state_of_protocol p).messages
+let string_of_hashes pattern hashes =
+  let left  = "- __H0__" :: (hashes /@ grid_left_of_mix) in
+  let right = (" = \"Monokex " ^ pattern ^ "\""
+               ^ " (ASCII, 64 bytes, zero padded)\n")
+              :: grid (hashes /@ grid_right_of_mix)      in
+  map2 (fun a b -> [a; b]) left right
+  |> grid
   |> String.concat ""
+
+let string_of_message msg_nb message =
+  "- __msg" ^ string_of_int msg_nb ^ "__ = "
+  ^ String.concat " || " (message /@ string_of_input)
+  ^ "\n"
+
+let string_of_messages messages = mapi 1 string_of_message messages
+                                  |> String.concat ""
+
+let get_last_hash      st = "H" ^ string_of_int      st.L.last_hash
+let get_hashes pattern st = string_of_hashes pattern st.L.hashes
+let get_messages       st = string_of_messages       st.L.messages
 
 let pre_shared : P.protocol -> string = fun p ->
   match ((P.cs_protocol p |> fst |> List.concat)
@@ -135,8 +87,8 @@ let pre_shared : P.protocol -> string = fun p ->
          /@ P.to_cs_key
          /@ P.string_of_key) with
   | []       -> ""
-  | [k1]     -> "Note that " ^ k1 ^                 " is shared in advance.\n"
-  | [k1; k2] -> "Note that " ^ k1 ^ " and " ^ k2 ^ " are shared in advance.\n"
+  | [k1]     -> "Note that " ^ k1 ^                 " is shared in advance.\n\n"
+  | [k1; k2] -> "Note that " ^ k1 ^ " and " ^ k2 ^ " are shared in advance.\n\n"
   | _        -> error "pre_shared"
 
 let amplified_messages p =
@@ -191,7 +143,7 @@ let handshake : P.protocol -> string = fun p ->
   let msgs = snd (P.cs_protocol p)               in
   (messages "initiator" "respondent" 1 0 msgs)
   ^ "- The protocol is complete.  The session keys are the two halves of "
-  ^ curr_hash (state_of_protocol p)
+  ^ get_last_hash (L.log_of_protocol p)
   ^ ".\n"
 
 let print : out_channel -> string -> P.protocol -> unit =
@@ -213,15 +165,13 @@ let print : out_channel -> string -> P.protocol -> unit =
   pe "Those shared secrets are hashed to derive the following keys";
   pe "(`||`denotes concatenation, zero and one are one byte numbers):";
   pe "";
-  pe ("- __H0__ = \"Monokex " ^ pattern ^ "\"  (ASCII, 64 bytes, zero padded)");
-  ps (all_keys p);
+  ps (get_hashes pattern (L.log_of_protocol p));
   pe "";
   pe "The messages contain the following (the payloads \"p*\" are optional):";
   pe "";
-  ps (messages p);
+  ps (get_messages (L.log_of_protocol p));
   pe "";
   ps (pre_shared p);
-  pe "";
   ps (amplified_messages p);
   pe "The handshake proceeds as follows:";
   pe "";
