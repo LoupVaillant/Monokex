@@ -46,8 +46,29 @@ let message_order p =
   in
   match snd p with
   | []              -> ["There is no message!"]
-  | P.Server _ :: l -> "First message come from the respondent." :: aux l
+  | P.Server _ :: l -> "First message comes from the respondent." :: aux l
   | l               -> aux l
+
+let duplicate_exchanges p =
+  duplicates (P.all_exchanges p)
+  /@ (fun x -> "The exchange " ^ P.string_of_exchange x
+               ^ " appears more than once.")
+
+let duplicate_keys p =
+  duplicates (P.all_keys p)
+  /@ (fun x -> "The key " ^ P.string_of_key x ^ " appears more than once.")
+
+let unused_key p =
+  let keys      = P.all_keys      p in
+  let exchanges = P.all_exchanges p in
+  keys // ((function
+            | P.IE -> List.exists (fun e -> fst e = P.E) exchanges
+            | P.IS -> List.exists (fun e -> fst e = P.S) exchanges
+            | P.RE -> List.exists (fun e -> snd e = P.E) exchanges
+            | P.RS -> List.exists (fun e -> snd e = P.S) exchanges)
+           |- not)
+  /@ P.string_of_key
+  /@ (fun k -> "Key " ^ k ^ " is unused.")
 
 let pre_shared_ephemeral p =
   let keys = P.get_cs_keys (pre_actions p) in
@@ -59,6 +80,11 @@ let pre_done_key_exchange p =
   P.get_cs_exchanges (pre_actions p)
   /@ P.string_of_exchange
   /@ (fun e -> "Exchange " ^ e ^ " happens before protocol start.")
+
+let sender_key_first p =
+  match fst (P.cs_protocol p) /@ P.get_cs_keys |> List.concat with
+  | [P.RS; P.IS] ->["Monokex does not support pre-sharing respondent key first"]
+  | _            -> []
 
 (* TODO: tell the user exactly why the exchange cannot happen:
  * We should tell which key is either missing or happens too late.
@@ -83,36 +109,6 @@ let impossible_exchanges p =
   |> List.map snd
   |> List.map (fun e -> "The exchange " ^ P.string_of_exchange e
                         ^ " cannot be performed.")
-
-let duplicate_exchanges p =
-  duplicates (P.all_exchanges p)
-  /@ (fun x -> "The exchange " ^ P.string_of_exchange x
-               ^ " appears more than once.")
-
-let duplicate_keys p =
-  duplicates (P.all_keys p)
-  /@ (fun x -> "The key " ^ P.string_of_key x ^ " appears more than once.")
-
-let two_keys_in_a_row p =
-  all_actions p
-  |> drop_while P.is_cs_key (* remove unencrypted keys *)
-  |> runs_of    P.is_cs_key
-  |> List.filter (fun run -> List.length run > 1)
-  |> (function
-      |[] -> []
-      | _  -> ["Monokex does not support two encrypted keys in a row."])
-
-let unused_key p =
-  let keys      = P.all_keys      p in
-  let exchanges = P.all_exchanges p in
-  keys // ((function
-            | P.IE -> List.exists (fun e -> fst e = P.E) exchanges
-            | P.IS -> List.exists (fun e -> fst e = P.S) exchanges
-            | P.RE -> List.exists (fun e -> snd e = P.E) exchanges
-            | P.RS -> List.exists (fun e -> snd e = P.S) exchanges)
-           |- not)
-  /@ P.string_of_key
-  /@ (fun k -> "Key " ^ k ^ " is unused.")
 
 let must_use_ephemeral p =
   let kci n used unused =
@@ -151,10 +147,9 @@ let v p =
        ; [ pre_shared_ephemeral  p
          ; pre_done_key_exchange p
          ]
-       ; [ impossible_exchanges  p
-         ; two_keys_in_a_row     p
-         ]
-       ; [ must_use_ephemeral    p
+       ; [ sender_key_first      p
+         ; impossible_exchanges  p
+         ; must_use_ephemeral    p
          ]
        ]
     )
