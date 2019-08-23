@@ -35,6 +35,7 @@ let _ =
 
   Gen_code.print_header_prefix header;
   iter_pair (Gen_code.print_header_pattern header) protocols;
+  Gen_code.print_header_suffix header;
 
   Gen_code.print_source_prefix source;
   iter_pair (Gen_code.print_source_pattern source) protocols;

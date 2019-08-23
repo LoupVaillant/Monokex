@@ -149,7 +149,10 @@ let init_source pattern cs protocol =
 
 (* Common source code *)
 let header_prefix =
-  [ "#include <inttypes.h>"
+  [ "#ifndef MONOKEX_H" (* we use the header name here, not the prefix *)
+  ; "#define MONOKEX_H" (* we use the header name here, not the prefix *)
+  ; ""
+  ; "#include <inttypes.h>"
   ; "#include <stddef.h>"
   ; ""
   ; "typedef struct {"
@@ -236,6 +239,8 @@ let header_prefix =
       ; [ "size_t *next_message_size"    ]
       ] ^ ";"
   ]
+
+let header_suffix = [ "#endif // MONOKEX_H" ]
 
 let source_prefix =
   [ "#include \"monocypher.h\""
@@ -590,6 +595,7 @@ let print_lines channel lines =
   List.iter (fun line -> output_string channel (line ^ "\n")) lines
 
 let print_header_prefix channel = print_lines channel header_prefix
+let print_header_suffix channel = print_lines channel header_suffix
 let print_source_prefix channel = print_lines channel source_prefix
 
 (* Specific source code *)
