@@ -13,11 +13,13 @@ type input = Iraw of       raw_input
            | Zero
            | One
 
-type mix = hash * int * input
+type mix = hash * int * input (* next hash, previous hash, mixed input *)
 
-type log = { last_hash : int
-           ; hashes    : mix list
-           ; messages  : input list list
+type log = { initial_hash : int
+           ; prelude_hash : int
+           ; last_hash    : int
+           ; hashes       : mix list
+           ; messages     : (input list * int) list (* message + hash *)
            }
 
 val log_of_protocol : Proto.protocol -> log

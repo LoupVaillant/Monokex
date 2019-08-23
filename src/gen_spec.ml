@@ -79,7 +79,7 @@ let string_of_messages messages = mapi 1 string_of_message messages
 
 let get_last_hash      st = "H" ^ string_of_int      st.L.last_hash
 let get_hashes pattern st = string_of_hashes pattern st.L.hashes
-let get_messages       st = string_of_messages       st.L.messages
+let get_messages       st = string_of_messages      (st.L.messages /@ fst)
 
 let pre_shared : P.protocol -> string = fun p ->
   match ((P.cs_protocol p |> fst |> List.concat)

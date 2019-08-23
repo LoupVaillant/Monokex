@@ -23,14 +23,16 @@ type state = { hash_nb  : int  (* current hash    number *)
              ; key_nb   : int  (* current key     number *)
              ; msg_nb   : int  (* current message number *)
              ; hashes   : mix list
-             ; messages : input list list
+             ; messages : (input list * int) list (* message + hash *)
              ; curr_msg : input list
              ; has_key  : bool
              }
 
-type log = { last_hash : int
-           ; hashes    : mix list
-           ; messages  : input list list
+type log = { initial_hash : int
+           ; prelude_hash : int
+           ; last_hash    : int
+           ; hashes       : mix list
+           ; messages     : (input list * int) list (* message + hash *)
            }
 
 let inc_hash  st = { st with hash_nb = st.hash_nb + 1 }
@@ -77,7 +79,8 @@ let mix_key      k st = st |> mix_ekey |> mix_hash (key_input      k)
 let mix_exchange e st = st             |> mix_hash (exchange_input e)
 
 let msg_bit input st = { st with curr_msg = input st :: st.curr_msg }
-let commit_msg    st = { st with messages = List.rev st.curr_msg :: st.messages
+let commit_msg    st = { st with messages = (List.rev st.curr_msg, st.hash_nb)
+                                            :: st.messages
                                ; curr_msg = []
                                ; msg_nb   = st.msg_nb + 1 }
 
@@ -121,7 +124,11 @@ let log_of_protocol p =
   |> swap (List.fold_left add_pre_message) pre_messages
   |> add_prelude
   |> swap (List.fold_left add_message) messages
-  |> fun st -> { last_hash = st.hash_nb
-               ; hashes    = List.rev st.hashes
-               ; messages  = List.rev st.messages
+  |> fun st -> let initial_hash = fst (P.cs_protocol p) /@ P.get_cs_keys
+                                  |> List.concat |> List.length in
+               { initial_hash = initial_hash
+               ; prelude_hash = initial_hash + 1
+               ; last_hash    = st.hash_nb
+               ; hashes       = List.rev st.hashes
+               ; messages     = List.rev st.messages
                }
