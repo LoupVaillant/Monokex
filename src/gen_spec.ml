@@ -26,39 +26,45 @@ let string_of_hash = function
   | L.Htag i -> "T" ^ string_of_int i
   | L.Hkey i -> "K" ^ string_of_int i
 
-let string_of_raw_input = function
-  | L.Prelude    -> "prelude"
-  | L.Payload  i -> "p" ^ string_of_int i
+let string_of_plain = function
+  | L.Payload i -> "p" ^ string_of_int i
+  | L.Key k     -> P.string_of_key k
+
+let string_of_crypt = function
+  | L.Plain p      -> string_of_plain p
+  | L.Crypt (p, i) -> "Chacha20(K" ^ string_of_int i
+                      ^ ", " ^ string_of_plain p ^ ")"
+
+let string_of_mix_input = function
+  | L.Hcrypt c   -> string_of_crypt c
   | L.Exchange e -> P.string_of_exchange e
-  | L.Key      k -> P.string_of_key      k
+  | L.Prelude    -> "prelude"
+  | L.Zero       -> "zero"
+  | L.One        -> "one"
 
-let string_of_input = function
-  | L.Iraw     raw  -> string_of_raw_input raw
-  | L.Ienc (i, raw) -> "Chacha20(K" ^ string_of_int i
-                       ^ ", " ^ string_of_raw_input raw ^ ")"
-  | L.Itag  i       -> "T" ^ string_of_int i
-  | L.Zero          -> "zero"
-  | L.One           -> "one"
+let string_of_msg_part = function
+  | L.Mcrypt c -> string_of_crypt c
+  | L.Mtag   i -> "T" ^ string_of_int i
 
-let grid_left_of_mix ((hash, _, _) : L.mix) =
-  "- __" ^ string_of_hash hash ^ "__"
+let grid_left_of_mix mix =
+  "- __" ^ string_of_hash mix.L.next ^ "__"
 
-let grid_right_of_mix ((_, prev, input) : L.mix) =
-  let finish     = ", H" ^ string_of_int prev ^ " otherwise"               in
-  let prelude    = " if there is a prelude" ^ finish                       in
-  let payload i  = " if msg" ^ string_of_int i ^ " has a payload" ^ finish in
-  let opt_string = match input with
-    | L.Iraw L.Prelude        -> prelude
-    | L.Ienc (k, L.Prelude  ) -> prelude
-    | L.Iraw (   L.Payload i) -> payload i
-    | L.Ienc (k, L.Payload i) -> payload i
-    | _                       -> ""
-  in
-  [ " = Blake2b(H" ^ string_of_int prev
-  ; " || " ^ string_of_input input ^ ")"
-    ^ opt_string
-    ^ "\n"
-  ]
+let grid_right_of_mix mix =
+  let prefix = " = Blake2b(H" ^ string_of_int mix.L.prev      in
+  let middle = " || " ^ string_of_mix_input mix.L.input ^ ")" in
+  let suffix =
+    (match mix.L.fallback with
+     | None   -> ""
+     | Some f ->
+        let finish    = ", H" ^ string_of_int f ^ " otherwise"         in
+        let prelude   = " if there is a prelude"                       in
+        let payload i = " if msg" ^ string_of_int i ^ " has a payload" in
+        (match mix.L.input with
+         | L.Prelude                           -> prelude   ^ finish
+         | L.Hcrypt L.Plain  (L.Payload i)     -> payload i ^ finish
+         | L.Hcrypt L.Crypt ((L.Payload i), _) -> payload i ^ finish
+         | _                                   -> error "grid_right_of_mix"))
+  in [prefix; middle ^ suffix ^ "\n"]
 
 let string_of_hashes pattern hashes =
   let left  = "- __H0__" :: (hashes /@ grid_left_of_mix) in
@@ -71,7 +77,7 @@ let string_of_hashes pattern hashes =
 
 let string_of_message msg_nb message =
   "- __msg" ^ string_of_int msg_nb ^ "__ = "
-  ^ String.concat " || " (message /@ string_of_input)
+  ^ String.concat " || " (message /@ string_of_msg_part)
   ^ "\n"
 
 let string_of_messages messages = mapi 1 string_of_message messages

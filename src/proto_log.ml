@@ -5,26 +5,33 @@ type hash = Hash of int (* intermediate hash  *)
           | Htag of int (* authentication tag *)
           | Hkey of int (* encryption key     *)
 
-type raw_input = Prelude
-               | Payload  of int (* message number *)
-               | Key      of P.cs_key
+type plain = Payload of int (* message number *)
+           | Key     of P.cs_key
+type crypt = Plain of plain
+           | Crypt of plain * int (* encryption key number *)
+
+type mix_input = Hcrypt   of crypt
                | Exchange of P.exchange
+               | Prelude
+               | Zero
+               | One
 
-type input = Iraw of       raw_input
-           | Ienc of int * raw_input (* key number, input *)
-           | Itag of int             (* tag number *)
-           | Zero
-           | One
+type mix = { next     : hash
+           ; prev     : int        (* only H<nb> *)
+           ; input    : mix_input
+           ; fallback : int option (* only H<nb> *)
+           }
 
-type mix = hash * int * input
+type msg_part = Mcrypt of crypt
+              | Mtag   of int
 
 type state = { hash_nb  : int  (* current hash    number *)
              ; tag_nb   : int  (* current tag     number *)
              ; key_nb   : int  (* current key     number *)
              ; msg_nb   : int  (* current message number *)
              ; hashes   : mix list
-             ; messages : (input list * int) list (* message + hash *)
-             ; curr_msg : input list
+             ; messages : (msg_part list * int) list (* message + hash *)
+             ; curr_msg : msg_part list
              ; has_key  : bool
              }
 
@@ -32,65 +39,86 @@ type log = { initial_hash : int
            ; prelude_hash : int
            ; last_hash    : int
            ; hashes       : mix list
-           ; messages     : (input list * int) list (* message + hash *)
+           ; messages     : (msg_part list * int) list (* message + hash *)
            }
+
+let next_hash st = Hash (st.hash_nb + 1)
+let next_tag  st = Htag (st.tag_nb  + 1)
+let next_key  st = Hkey (st.key_nb  + 1)
 
 let inc_hash  st = { st with hash_nb = st.hash_nb + 1 }
 let inc_tag   st = { st with tag_nb  = st.tag_nb  + 1 }
 let inc_key   st = { st with key_nb  = st.key_nb  + 1 }
 let inc_msg   st = { st with msg_nb  = st.msg_nb  + 1 }
 
-let input_of_raw st raw = if st.has_key
-                          then Ienc (st.key_nb, raw)
-                          else Iraw raw
+let mix_input_of_crypt st plain = Hcrypt (if st.has_key
+                                          then Crypt (plain, st.key_nb)
+                                          else Plain plain)
 
-let add_hash hash_line (st:state) = { st with hashes  = hash_line :: st.hashes }
+let payload_crypt st = if st.has_key
+                       then Crypt (Payload st.msg_nb, st.key_nb)
+                       else Plain (Payload st.msg_nb)
+let key_crypt   k st = if st.has_key && P.is_static k
+                       then Crypt (Key k, st.key_nb)
+                       else Plain (Key k)
+
+let payload_input st = Hcrypt (payload_crypt st)
+let key_input   k st = Hcrypt (key_crypt   k st)
+let payload_part  st = Mcrypt (payload_crypt st)
+let key_part    k st = Mcrypt (key_crypt   k st)
+
+let hash_line st mix_input hash_output =
+  { next     = hash_output
+  ; prev     = st.hash_nb
+  ; input    = mix_input
+  ; fallback = match mix_input with
+               | Hcrypt (Crypt (Payload _ , _)) -> Some (st.hash_nb - 1)
+               | Hcrypt (Plain (Payload _    )) -> Some st.hash_nb
+               | Prelude                        -> Some st.hash_nb
+               | _                              -> None
+  }
+
+let add_hash_line line (st:state) = { st with hashes = line :: st.hashes }
 
 let mix_hash input st =
   st
-  |> add_hash (Hash (st.hash_nb + 1), st.hash_nb, input st)
+  |> add_hash_line (hash_line st (input st) (next_hash st))
   |> inc_hash
-
-let prelude_input    st = Iraw Prelude
-let payload_input    st = input_of_raw st (Payload st.msg_nb)
-let exchange_input e st = Iraw (Exchange e)
-let key_input      k st = if P.is_ephemeral k
-                          then Iraw            (Key k)
-                          else input_of_raw st (Key k)
 
 let mix_tag st =
   if st.has_key
   then st
-       |> add_hash (Hash (st.hash_nb + 1), st.hash_nb, Zero)
-       |> add_hash (Htag (st.tag_nb  + 1), st.hash_nb, One)
+       |> add_hash_line (hash_line st Zero (next_hash st))
+       |> add_hash_line (hash_line st One  (next_tag  st))
        |> inc_tag |> inc_hash
   else st
+
 let mix_ekey st =
   if st.has_key
   then st
-       |> add_hash (Hash (st.hash_nb + 1), st.hash_nb, Zero)
-       |> add_hash (Hkey (st.key_nb  + 1), st.hash_nb, One)
+       |> add_hash_line (hash_line st Zero (next_hash st))
+       |> add_hash_line (hash_line st One  (next_key  st))
        |> inc_key |> inc_hash
   else st
 
-let mix_prelude    st = st |> mix_ekey |> mix_hash (prelude_input   )
-let mix_payload    st = st |> mix_ekey |> mix_hash (payload_input   )
-let mix_key      k st = st |> mix_ekey |> mix_hash (key_input      k)
-let mix_exchange e st = st             |> mix_hash (exchange_input e)
+let mix_prelude    st = st |> mix_ekey |> mix_hash (fun _ -> Prelude)
+let mix_payload    st = st |> mix_ekey |> mix_hash payload_input
+let mix_key      k st = st |> mix_ekey |> mix_hash (key_input k)
+let mix_exchange e st = st             |> mix_hash (fun _ -> Exchange e)
 
-let msg_bit input st = { st with curr_msg = input st :: st.curr_msg }
-let commit_msg    st = { st with messages = (List.rev st.curr_msg, st.hash_nb)
-                                            :: st.messages
-                               ; curr_msg = []
-                               ; msg_nb   = st.msg_nb + 1 }
+let msg_part input st = { st with curr_msg = input st :: st.curr_msg }
+let commit_msg     st = { st with messages = (List.rev st.curr_msg, st.hash_nb)
+                                             :: st.messages
+                                ; curr_msg = []
+                                ; msg_nb   = st.msg_nb + 1 }
 
-let add_tag        st = if st.has_key
-                        then st |> mix_tag |> msg_bit (fun st -> Itag st.tag_nb)
-                        else st
+let add_tag st = if st.has_key
+                 then st |> mix_tag |> msg_part (fun st -> Mtag st.tag_nb)
+                 else st
 
 let add_prelude    st = st |> mix_prelude                             |> add_tag
-let add_payload    st = st |> mix_payload    |> msg_bit payload_input |> add_tag
-let add_key      k st = st |> mix_key k      |> msg_bit (key_input k) |> add_tag
+let add_payload    st = st |> mix_payload    |> msg_part payload_part |> add_tag
+let add_key      k st = st |> mix_key k      |> msg_part (key_part k) |> add_tag
 let add_exchange e st = st |> mix_exchange e |> fun st->{st with has_key = true}
 
 let add_pre_message st msg =
