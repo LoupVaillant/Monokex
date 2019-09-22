@@ -9,8 +9,8 @@ let keys : P.protocol -> string = fun p ->
   ""
   ^ kk P.IS "- __(is, IS)__ The initiator's static key.\n"
   ^ kk P.IE "- __(ie, IE)__ The initiator's ephemeral key.\n"
-  ^ kk P.RS "- __(rs, RS)__ The respondent's static key.\n"
-  ^ kk P.RE "- __(re, RE)__ The respondent's ephemeral key.\n"
+  ^ kk P.RS "- __(rs, RS)__ The responder's static key.\n"
+  ^ kk P.RE "- __(re, RE)__ The responder's ephemeral key.\n"
 
 let secrets p =
   P.all_exchanges p
@@ -147,7 +147,7 @@ let handshake : P.protocol -> string = fun p ->
                      receiver sender
                      (msg_num + 1) nex ms        in
   let msgs = snd (P.cs_protocol p)               in
-  (messages "initiator" "respondent" 1 0 msgs)
+  (messages "initiator" "responder" 1 0 msgs)
   ^ "- The protocol is complete.  The session keys are the two halves of "
   ^ get_last_hash (L.log_of_protocol p)
   ^ ".\n"
