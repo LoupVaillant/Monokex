@@ -1,13 +1,14 @@
 OFLAGS = -I src
 
-SRC = src/utils.ml     \
-      src/proto.ml     \
-      src/scan.ml      \
-      src/parsec.ml    \
-      src/validate.ml  \
-      src/proto_log.ml \
-      src/gen_spec.ml  \
-      src/gen_code.ml  \
+SRC = src/utils.ml       \
+      src/proto.ml       \
+      src/scan.ml        \
+      src/parsec.ml      \
+      src/validate.ml    \
+      src/proto_log.ml   \
+      src/gen_spec.ml    \
+      src/gen_code.ml    \
+      src/gen_vectors.ml \
 
 MLI = $(patsubst %.ml, %.mli, $(SRC))
 CMI = $(patsubst %.ml, %.cmi, $(SRC))
