@@ -1,6 +1,7 @@
 (* Application wide parameters. *)
-val prefix     : string
-val prefix_caps: string
+val prefix      : string
+val prefix_caps : string
+val prefix_space: string
 
 (* Ordinary utilities *)
 val pair    : 'a -> 'b -> 'a * 'b

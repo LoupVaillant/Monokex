@@ -1,6 +1,7 @@
 (* Application wide parameters. *)
-let prefix      = "crypto_kex_"
-let prefix_caps = String.uppercase_ascii prefix
+let prefix       = "crypto_kex_"
+let prefix_caps  = String.uppercase_ascii prefix
+let prefix_space = String.make (String.length prefix) ' '
 
 (* Ordinary utilities *)
 let pair   a b        = (a, b)
