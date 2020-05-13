@@ -23,13 +23,6 @@ NK1:
   -> e
   <- e, ee, es
 
-KK:
-  -> s
-  <- s
-  ...
-  -> e, es, ss
-  <- e, ee, se
-
 X:
   <- s
   ...

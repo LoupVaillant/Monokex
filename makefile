@@ -8,11 +8,15 @@ SRC = src/utils.ml       \
       src/proto_log.ml   \
       src/gen_spec.ml    \
       src/gen_code.ml    \
+      src/gen_test.ml    \
       src/gen_vectors.ml \
 
 MLI = $(patsubst %.ml, %.mli, $(SRC))
 CMI = $(patsubst %.ml, %.cmi, $(SRC))
 CMO = $(patsubst %.ml, %.cmo, $(SRC))
+
+CC     = gcc -std=gnu99
+CFLAGS = -pedantic -Wall -Wextra
 
 .PHONY: all clean repl
 
@@ -21,12 +25,23 @@ repl: src/repl.out
 clean:
 	rm -f src/*.cmi src/*.cmo
 	rm -f src/scan.ml
-	rm -f gen.out src/repl.out
+	rm -f *.out src/*.out
 	rm -rf gen
 
-gen: gen.out protocols.txt
+gen: gen.out protocols.txt gen/test_core.c gen/test_core.h
 	mkdir -p gen
 	./gen.out gen < protocols.txt
+	$(CC) $(CFLAGS) -fPIC -I gen -o test.out     \
+            gen/test.c gen/test_core.c gen/monokex.c \
+             $$(pkg-config monocypher --cflags)      \
+             $$(pkg-config monocypher --libs)
+	./test.out
+
+gen/test_core.c: src/test_core.c
+gen/test_core.h: src/test_core.h
+gen/test_core.c gen/test_core.h:
+	@mkdir -p $(@D)
+	cp $< $@
 
 gen.out: src/main.ml $(CMO)
 	ocamlc $(OFLAGS) str.cma  $(CMO) $< -o $@

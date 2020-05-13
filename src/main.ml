@@ -27,6 +27,7 @@ let _ =
   let source    = open_out (folder ^ "/monokex.c")            in
   (* let v_header  = open_out (folder ^ "/vectors.h")            in *)
   let v_source  = open_out (folder ^ "/vectors.c")            in
+  let test      = open_out (folder ^ "/test.c")               in
   let protocols = parse stdin                                 in
   let errors    = protocols /@ protocol_errors |> List.concat in
 
@@ -44,6 +45,17 @@ let _ =
 
   iter_pair (Gen_vectors.print_source v_source) protocols;
 
+  Gen_test.print_prefix test;
+  iter_pair (Gen_test.print_pattern test) protocols;
+  output_string test "\nint main()\n{\n";
+  List.iter (fst
+             |- String.lowercase_ascii
+             |- (fun pattern -> "    test_" ^  pattern ^ "();\n")
+             |- output_string test)
+    protocols;
+  output_string test "    return 0;\n}\n";
+
+  close_out test;
   close_out source;
   close_out header;
   close_out spec;

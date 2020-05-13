@@ -77,12 +77,15 @@ let cs_protocol p =
   (fst p /@ cs_message,
    snd p /@ cs_message)
 
-let all_keys p =
-  to_messages p
+let keys_of_messages messages =
+  messages
   |> List.map (map_message
                  (fun a -> (get_keys a) /@ map_key IE IS)
                  (fun a -> (get_keys a) /@ map_key RE RS))
   |> List.concat
+
+let shared_keys p = keys_of_messages (fst         p)
+let all_keys    p = keys_of_messages (to_messages p)
 
 let all_exchanges p =
   to_messages p

@@ -47,6 +47,7 @@ val get_server_messages : message   list -> action list list
 val cs_message : message  -> cs_message
 val cs_protocol: protocol -> cs_protocol
 
+val shared_keys  : protocol -> cs_key   list
 val all_keys     : protocol -> cs_key   list
 val all_exchanges: protocol -> exchange list
 
