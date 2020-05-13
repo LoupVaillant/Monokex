@@ -9,7 +9,6 @@ SRC = src/utils.ml       \
       src/gen_spec.ml    \
       src/gen_code.ml    \
       src/gen_test.ml    \
-      src/gen_vectors.ml \
 
 MLI = $(patsubst %.ml, %.mli, $(SRC))
 CMI = $(patsubst %.ml, %.cmi, $(SRC))

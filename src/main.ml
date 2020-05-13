@@ -25,8 +25,6 @@ let _ =
   let spec      = open_out (folder ^ "/spec.md"  )            in
   let header    = open_out (folder ^ "/monokex.h")            in
   let source    = open_out (folder ^ "/monokex.c")            in
-  (* let v_header  = open_out (folder ^ "/vectors.h")            in *)
-  let v_source  = open_out (folder ^ "/vectors.c")            in
   let test      = open_out (folder ^ "/test.c")               in
   let protocols = parse stdin                                 in
   let errors    = protocols /@ protocol_errors |> List.concat in
@@ -42,8 +40,6 @@ let _ =
 
   Gen_code.print_source_prefix source;
   iter_pair (Gen_code.print_source_pattern source) protocols;
-
-  iter_pair (Gen_vectors.print_source v_source) protocols;
 
   Gen_test.print_prefix test;
   iter_pair (Gen_test.print_pattern test) protocols;
