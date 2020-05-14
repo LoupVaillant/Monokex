@@ -455,11 +455,7 @@ void test_pattern(const crypto_kex_ctx *client,
             // should result in failure: at the end of the handshake,
             // the whole transcript is authenticated.
             u8     corrupt_with = 128;
-            size_t corrupt_at   = 15;
-            while (corrupt_at < msg_sizes[i] + 15) {
-                if (corrupt_at >= msg_sizes[i]) {
-                    corrupt_at = msg_sizes[i] - 1;
-                }
+            FOR (corrupt_at, 0, msg_sizes[i]) {
                 outputs out_client;
                 outputs out_server;
                 size_t  corrupt_sizes[5];
@@ -472,7 +468,6 @@ void test_pattern(const crypto_kex_ctx *client,
                     ko = ko || corrupt_sizes[j] == (size_t)-1;
                 }
                 assert(ko);
-                corrupt_at += 16;
             }
         }
     }
