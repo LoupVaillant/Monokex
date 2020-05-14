@@ -1,18 +1,69 @@
-XK1:
+N:
   <- s
   ...
+  -> e, es
+K:
+  -> s
+  <- s
+  ...
+  -> e, es, ss
+X:
+  <- s
+  ...
+  -> e, es, s, ss
+
+NN:
   -> e
-  <- e, ee, es
+  <- e, ee
+NK:
+  <- s
+  ...
+  -> e, es
+  <- e, ee
+NX:
+  -> e
+  <- e, ee, s, es
+
+KN:
+  -> s
+  ...
+  -> e
+  <- e, ee, se
+KK:
+  -> s
+  <- s
+  ...
+  -> e, es, ss
+  <- e, ee, se
+KX:
+  -> s
+  ...
+  -> e
+  <- e, ee, se, s, es
+
+XN:
+  -> e
+  <- e, ee
+  -> s, se
+XK:
+  <- s
+  ...
+  -> e, es
+  <- e, ee
+  -> s, se
+XX:
+  -> e
+  <- e, ee, s, es
   -> s, se
 
-X1K1:
+IN:
+  -> e, s
+  <- e, ee, se
+IK:
   <- s
   ...
-  -> e
-  <- e, ee, es
-  -> s
-  <- se
-
+  -> e, es, s, ss
+  <- e, ee, se
 IX:
   -> e, s
   <- e, ee, se, s, es
@@ -22,8 +73,134 @@ NK1:
   ...
   -> e
   <- e, ee, es
+NX1:
+  -> e
+  <- e, ee, s
+  -> es
 
-X:
+K1N:
+  -> s
+  ...
+  -> e
+  <- e, ee
+  -> se
+
+K1K:
+  -> s
   <- s
   ...
-  -> e, es, s, ss
+  -> e, es
+  <- e, ee
+  -> se
+
+KK1:
+  -> s
+  <- s
+  ...
+  -> e
+  <- e, ee, se, es
+
+K1K1:
+  -> s
+  <- s
+  ...
+  -> e
+  <- e, ee, es
+  -> se
+
+K1X:
+  -> s
+  ...
+  -> e
+  <- e, ee, s, es
+  -> se
+KX1:
+  -> s
+  ...
+  -> e
+  <- e, ee, se, s
+  -> es
+K1X1:
+  -> s
+  ...
+  -> e
+  <- e, ee, s
+  -> se, es
+
+X1N:
+  -> e
+  <- e, ee
+  -> s
+  <- se
+
+X1K:
+  <- s
+  ...
+  -> e, es
+  <- e, ee
+  -> s
+  <- se
+XK1:
+  <- s
+  ...
+  -> e
+  <- e, ee, es
+  -> s, se
+X1K1:
+  <- s
+  ...
+  -> e
+  <- e, ee, es
+  -> s
+  <- se
+
+X1X:
+  -> e
+  <- e, ee, s, es
+  -> s
+  <- se
+XX1:
+  -> e
+  <- e, ee, s
+  -> es, s, se
+X1X1:
+  -> e
+  <- e, ee, s
+  -> es, s
+  <- se
+
+I1N:
+  -> e, s
+  <- e, ee
+  -> se
+
+I1K:
+  <- s
+  ...
+  -> e, es, s
+  <- e, ee
+  -> se
+IK1:
+  <- s
+  ...
+  -> e, s
+  <- e, ee, se, es
+I1K1:
+  <- s
+  ...
+  -> e, s
+  <- e, ee, es
+  -> se
+
+I1X:
+  -> e, s
+  <- e, ee, s, es
+  -> se
+IX1:
+  -> e, s
+  <- e, ee, se, s
+  -> es
+I1X1:
+  -> e, s
+  <- e, ee, s
+  -> se, es
