@@ -1,0 +1,11 @@
+prefix=/PREFIX
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: monokex
+Version: __git__
+Description: Simple authenticated key exchange protocols.
+
+Libs: -L${libdir} -lmonokex
+Cflags: -I${includedir}

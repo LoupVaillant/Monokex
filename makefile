@@ -27,18 +27,16 @@ clean:
 	rm -f *.out src/*.out
 	rm -rf gen
 
-gen: gen.out protocols.txt gen/test_core.c gen/test_core.h
+gen: gen.out protocols.txt gen/test_core.c gen/test_core.h gen/makefile gen/monokex.pc
 	mkdir -p gen
 	./gen.out gen < protocols.txt
-	$(CC) $(CFLAGS) -fPIC -I gen -o test.out     \
-            gen/test.c gen/test_core.c gen/monokex.c \
-             $$(pkg-config monocypher --cflags)      \
-             $$(pkg-config monocypher --libs)
-	./test.out
+	(cd gen; make test)
 
 gen/test_core.c: src/test_core.c
 gen/test_core.h: src/test_core.h
-gen/test_core.c gen/test_core.h:
+gen/makefile   : src/makefile
+gen/monokex.pc : src/monokex.pc
+gen/test_core.c gen/test_core.h gen/makefile gen/monokex.pc:
 	@mkdir -p $(@D)
 	cp $< $@
 
