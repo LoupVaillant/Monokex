@@ -27,24 +27,15 @@ clean:
 	rm -f *.out src/*.out
 	rm -rf gen
 
-gen: gen.out protocols.txt gen/test_core.c gen/test_core.h gen/makefile gen/monokex.pc
-	mkdir -p gen
+gen: gen.out protocols.txt
 	./gen.out < protocols.txt
 	(cd gen; make test)
 
-gen/test_core.c: src/test_core.c
-gen/test_core.h: src/test_core.h
-gen/makefile   : src/makefile
-gen/monokex.pc : src/monokex.pc
-gen/test_core.c gen/test_core.h gen/makefile gen/monokex.pc:
-	@mkdir -p $(@D)
-	cp $< $@
-
 gen.out: src/main.ml $(CMO)
-	ocamlc $(OFLAGS) str.cma  $(CMO) $< -o $@
+	ocamlc $(OFLAGS) str.cma unix.cma $(CMO) $< -o $@
 
 src/repl.out: $(CMO) $(CMI)
-	ocamlmktop $(OFLAGS) str.cma $(CMO) -o $@
+	ocamlmktop $(OFLAGS) str.cma unix.cma $(CMO) -o $@
 
 %.cmi : %.mli $(MLI)
 	ocamlc $< $(OFLAGS) -c
