@@ -152,7 +152,7 @@ let handshake : P.protocol -> string = fun p ->
   ^ get_last_hash (L.log_of_protocol p)
   ^ ".\n"
 
-let spec : string -> P.protocol -> string =
+let spec1 : string -> P.protocol -> string =
   fun pattern p ->
   String.concat "\n"
     [ pattern
@@ -177,5 +177,6 @@ let spec : string -> P.protocol -> string =
       ^ "The handshake proceeds as follows:"
     ; ""
     ; (handshake p)
-    ; ""
     ]
+
+let spec protocols = String.concat "\n\n" (map_pair spec1 protocols)

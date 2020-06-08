@@ -30,6 +30,7 @@ val mapi       : int -> (int -> 'a -> 'b) -> 'a list -> 'b list
 val zip_with   : ('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list
 val zip        : 'a list -> 'b list -> ('a * 'b) list
 val map2       : ('a -> 'b -> 'c) -> 'a list -> 'b list -> 'c list
+val map_pair   : ('a -> 'b -> 'c) -> ('a * 'b) list -> 'c list
 val take_while : ('a -> bool) -> 'a list -> 'a list
 val drop_while : ('a -> bool) -> 'a list -> 'a list
 

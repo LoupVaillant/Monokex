@@ -628,3 +628,12 @@ let source_pattern pattern p =
     ; init_source pattern Client p
     ; init_source pattern Server p
     ]
+
+
+let header protocols =
+  header_prefix
+  ^ String.concat "\n" (map_pair header_pattern protocols)
+  ^ header_suffix
+let source protocols =
+  source_prefix
+  ^ String.concat "\n" (map_pair source_pattern protocols)

@@ -39,6 +39,8 @@ let zip l1 l2 = zip_with pair l1 l2
 let rec map2 f l1 l2 = match l1, l2 with
   | x::l1, y::l2-> f x y  :: map2 f l1 l2
   | _           -> []
+let map_pair f l =
+  let l1, l2 = List.split l in map2 f l1 l2
 let rec take_while p = function
   | x :: l -> if p x then x :: take_while p l else []
   | []     -> []

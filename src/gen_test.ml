@@ -1,18 +1,6 @@
 open Utils
 module P = Proto
 
-let prefix =
-  String.concat "\n"
-    [ "#include \"test_core.h\""
-    ; "#include \"monokex.h\""
-    ; "#include \"monocypher.h\""
-    ; ""
-    ; "#define RANDOM_INPUT(name, size) u8 name[size]; p_random(name, size)"
-    ; ""
-    ; "typedef uint8_t u8;"
-    ; ""
-    ]
-
 let test_function : string -> P.protocol -> string = fun pattern p ->
   let lower_pattern = String.lowercase_ascii pattern             in
   let c_seed        = "    RANDOM_INPUT(client_seed, 32);\n"     in
@@ -45,3 +33,23 @@ let test_function : string -> P.protocol -> string = fun pattern p ->
   ^ "}\n"
 
 let pattern pattern p = "\n" ^ test_function pattern p
+
+
+
+let test protocols =
+  "#include \"test_core.h\"\n"
+  ^ "#include \"monokex.h\"\n"
+  ^ "#include \"monocypher.h\"\n"
+  ^ "\n"
+  ^ "#define RANDOM_INPUT(name, size) u8 name[size]; p_random(name, size)\n"
+  ^ "\n"
+  ^ "typedef uint8_t u8;\n"
+  ^ "\n"
+  ^ String.concat "\n" (map_pair pattern protocols)
+  ^ "\n\nint main()\n{\n"
+  ^ String.concat "\n"
+      (protocols /@ (fst
+                     |- String.lowercase_ascii
+                     |- (fun pattern -> "    test_" ^  pattern ^ "();")))
+  ^ "\n    return 0;\n}\n"
+

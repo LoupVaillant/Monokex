@@ -1,2 +1,1 @@
-val prefix  : string
-val pattern : string -> Proto.protocol -> string
+val test : (string * Proto.protocol) list -> string
