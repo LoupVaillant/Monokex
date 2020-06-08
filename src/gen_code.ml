@@ -148,7 +148,7 @@ let init_source pattern cs protocol =
   ^ init_body lower_pattern cs protocol
 
 (* Common source code *)
-let header_prefix =
+let header_prefix_lines =
   [ "#ifndef MONOKEX_H" (* we use the header name here, not the prefix *)
   ; "#define MONOKEX_H" (* we use the header name here, not the prefix *)
   ; ""
@@ -241,9 +241,9 @@ let header_prefix =
       ] ^ ";"
   ]
 
-let header_suffix = [ "#endif // MONOKEX_H" ]
+let header_suffix_lines = [ "#endif // MONOKEX_H" ]
 
-let source_prefix =
+let source_prefix_lines =
   [ "#include \"monocypher.h\""
   ; "#include \"monokex.h\""
   ; ""
@@ -600,30 +600,27 @@ let source_prefix =
   ; ""
   ]
 
-let print_lines channel lines =
-  List.iter (fun line -> output_string channel (line ^ "\n")) lines
-
-let print_header_prefix channel = print_lines channel header_prefix
-let print_header_suffix channel = print_lines channel header_suffix
-let print_source_prefix channel = print_lines channel source_prefix
+let header_prefix = String.concat "\n" header_prefix_lines
+let header_suffix = String.concat "\n" header_suffix_lines
+let source_prefix = String.concat "\n" source_prefix_lines
 
 (* Specific source code *)
 let block_comment comment =
   let slashes = "////" ^ String.make (String.length comment) '/' ^ "////" in
   slashes ^ "\n/// " ^ comment ^ " ///\n" ^ slashes
 
-let print_header_pattern channel pattern p =
+let header_pattern pattern p =
   let lower_pattern = String.lowercase_ascii pattern in
-  print_lines channel
+  String.concat "\n"
     [ block_comment pattern
     ; ""
     ; init_header lower_pattern Client p
     ; init_header lower_pattern Server p
     ]
 
-let print_source_pattern channel pattern p =
+let source_pattern pattern p =
   let lower_pattern = String.lowercase_ascii pattern in
-  print_lines channel
+  String.concat "\n"
     [ block_comment pattern
     ; "static const u8 pid_" ^ lower_pattern
       ^ "[64] = \"Monokex "       ^ pattern ^ "\";"

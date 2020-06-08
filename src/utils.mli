@@ -38,3 +38,7 @@ val pad_right : string list      -> string list
 val grid      : string list list -> string list
 val prototype : string -> string -> string list list -> string
 val paragraph : string -> string
+
+(* Reading & writing files *)
+val read : string -> string
+val write : string -> string -> unit

@@ -1,9 +1,9 @@
 open Utils
 
 (* Utils *)
-let iter_pair f l =
+let map_pair f l =
   let l1, l2 = List.split l in
-  List.iter2 f l1 l2
+  String.concat "\n" (List.map2 f l1 l2) ^ "\n"
 
 let panic error =
   prerr_endline error;
@@ -15,44 +15,32 @@ let protocol_errors (name, p) =
   | errors -> ["Bad protocol: " ^ name ^ ":\n"
                ^ String.concat "" (errors /@ (fun e -> "- " ^ e ^ "\n"))]
 
-let parse channel =
-  Lexing.from_channel channel
-  |> Scan.tokens
-  |> Parsec.protocols
+
+(* main code *)
+let protocols = Lexing.from_channel stdin |> Scan.tokens |> Parsec.protocols
+let errors    = protocols /@ protocol_errors |> List.concat
 
 let _ =
-  let folder    = Sys.argv.(1)                                in
-  let spec      = open_out (folder ^ "/spec.md"  )            in
-  let header    = open_out (folder ^ "/monokex.h")            in
-  let source    = open_out (folder ^ "/monokex.c")            in
-  let test      = open_out (folder ^ "/test.c")               in
-  let protocols = parse stdin                                 in
-  let errors    = protocols /@ protocol_errors |> List.concat in
-
-  if protocols = [] then panic "There is no protocol to generate!";
+  if protocols = [] then panic "There are no protocol to generate!";
   if errors   <> [] then panic ("\n" ^ String.concat "\n" errors ^ "\n");
 
-  iter_pair (Gen_spec.print spec) protocols;
+  write "gen/spec.md"
+    (map_pair (Gen_spec.spec) protocols);
 
-  Gen_code.print_header_prefix header;
-  iter_pair (Gen_code.print_header_pattern header) protocols;
-  Gen_code.print_header_suffix header;
+  write "gen/monokex.h"
+    (Gen_code.header_prefix
+     ^ map_pair (Gen_code.header_pattern) protocols
+     ^ Gen_code.header_suffix);
+  write "gen/monokex.c"
+    (Gen_code.source_prefix
+     ^ map_pair (Gen_code.source_pattern) protocols);
 
-  Gen_code.print_source_prefix source;
-  iter_pair (Gen_code.print_source_pattern source) protocols;
-
-  Gen_test.print_prefix test;
-  iter_pair (Gen_test.print_pattern test) protocols;
-  output_string test "\nint main()\n{\n";
-  List.iter (fst
-             |- String.lowercase_ascii
-             |- (fun pattern -> "    test_" ^  pattern ^ "();\n")
-             |- output_string test)
-    protocols;
-  output_string test "    return 0;\n}\n";
-
-  close_out test;
-  close_out source;
-  close_out header;
-  close_out spec;
-  ()
+  write "gen/test.c"
+    (Gen_test.prefix
+     ^ map_pair (Gen_test.pattern) protocols
+     ^ "\nint main()\n{\n"
+     ^ String.concat "\n"
+         (protocols /@ (fst
+                        |- String.lowercase_ascii
+                        |- (fun pattern -> "    test_" ^  pattern ^ "();")))
+     ^ "\n    return 0;\n}\n")

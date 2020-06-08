@@ -8,6 +8,9 @@ PKGCONFIGDIR = $(LIBDIR)/pkgconfig
 MANDIR       = $(PREFIX)/share/man/man3
 SONAME       = libmonokex.so.1
 
+CRYPTO_CFLAGS = $$(pkg-config monocypher --cflags)
+CRYPTO_LIBS   = $$(pkg-config monocypher --libs)
+
 .PHONY: all library static-library dynamic-library \
         install clean uninstall dist               \
         check test
@@ -41,8 +44,10 @@ libmonokex.so: $(SONAME)
 $(SONAME): monokex.o
 	$(CC) $(CFLAGS) $(LDFLAGS) -shared -Wl,-soname,$(SONAME) -o $@ $^
 
-test.out: test.c test_core.c test_core.h monokex.o
+monokex.o: monokex.c monokex.h
+	$(CC) $(CFLAGS) -fPIC -c -o $@ $< $(CRYPTO_CFLAGS)
+
+test.out: test.c test_core.c monokex.o
 	$(CC) $(CFLAGS) -fPIC -o $@                  \
             test.c test_core.c test_core.h monokex.o \
-            $$(pkg-config monocypher --cflags)       \
-            $$(pkg-config monocypher --libs)
+             $(CRYPTO_CFLAGS) $(CRYPTO_LIBS)

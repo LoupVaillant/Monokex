@@ -152,36 +152,30 @@ let handshake : P.protocol -> string = fun p ->
   ^ get_last_hash (L.log_of_protocol p)
   ^ ".\n"
 
-let print : out_channel -> string -> P.protocol -> unit =
-  fun channel pattern p ->
-  let ps s  = output_string channel s in
-  let pe s  = ps s; ps "\n"           in
-  pe pattern;
-  pe (String.make (max 3 (String.length pattern)) '=');
-  pe "";
-  pe "Sender and recipient have the following X25519 key pairs (private half";
-  pe "in lower case, public half in upper case):";
-  pe "";
-  ps (keys p);
-  pe "";
-  pe "Those key pairs are used to derive the following shared secrets:";
-  pe "";
-  ps (secrets p);
-  pe "";
-  pe "Those shared secrets are hashed to derive the following keys";
-  pe "(`||`denotes concatenation, zero and one are one byte numbers):";
-  pe "";
-  ps (get_hashes pattern (L.log_of_protocol p));
-  pe "";
-  pe "The messages contain the following (the payloads \"p*\" are optional):";
-  pe "";
-  ps (get_messages (L.log_of_protocol p));
-  pe "";
-  ps (pre_shared p);
-  ps (amplified_messages p);
-  pe "The handshake proceeds as follows:";
-  pe "";
-  ps (handshake p);
-  pe "";
-  pe "";
-  ()
+let spec : string -> P.protocol -> string =
+  fun pattern p ->
+  String.concat "\n"
+    [ pattern
+    ; (String.make (max 3 (String.length pattern)) '=')
+    ; ""
+    ; "Sender and recipient have the following X25519 key pairs (private half"
+    ; "in lower case, public half in upper case):"
+    ; ""
+    ; (keys p)
+    ; "Those key pairs are used to derive the following shared secrets:"
+    ; ""
+    ; (secrets p)
+    ; "Those shared secrets are hashed to derive the following keys"
+    ; "(`||`denotes concatenation, zero and one are one byte numbers):"
+    ; ""
+    ; (get_hashes pattern (L.log_of_protocol p))
+    ; "The messages contain the following (the payloads \"p*\" are optional):"
+    ; ""
+    ; (get_messages (L.log_of_protocol p))
+    ; (pre_shared p)
+      ^ (amplified_messages p)
+      ^ "The handshake proceeds as follows:"
+    ; ""
+    ; (handshake p)
+    ; ""
+    ]

@@ -29,7 +29,7 @@ clean:
 
 gen: gen.out protocols.txt gen/test_core.c gen/test_core.h gen/makefile gen/monokex.pc
 	mkdir -p gen
-	./gen.out gen < protocols.txt
+	./gen.out < protocols.txt
 	(cd gen; make test)
 
 gen/test_core.c: src/test_core.c

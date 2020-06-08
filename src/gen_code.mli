@@ -1,7 +1,6 @@
+val header_prefix : string
+val header_suffix : string
+val source_prefix : string
 
-val print_header_prefix : out_channel -> unit
-val print_header_suffix : out_channel -> unit
-val print_source_prefix : out_channel -> unit
-
-val print_header_pattern : out_channel -> string -> Proto.protocol -> unit
-val print_source_pattern : out_channel -> string -> Proto.protocol -> unit
+val header_pattern : string -> Proto.protocol -> string
+val source_pattern : string -> Proto.protocol -> string

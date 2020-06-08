@@ -109,3 +109,16 @@ let paragraph =
   |> lines
   |> List.map (String.concat " ")
   |> String.concat "\n"
+
+let read file =
+  let channel = open_in file              in
+  let size    = in_channel_length channel in
+  let bytes   = Bytes.create size         in
+  really_input channel bytes 0 size;
+  close_in channel;
+  Bytes.unsafe_to_string bytes
+
+let write file string =
+  let channel = open_out file in
+  output_string channel string;
+  close_out channel

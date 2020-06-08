@@ -1,8 +1,8 @@
 open Utils
 module P = Proto
 
-let print_prefix : out_channel -> unit = fun c ->
-  List.iter (fun line -> output_string c (line ^ "\n"))
+let prefix =
+  String.concat "\n"
     [ "#include \"test_core.h\""
     ; "#include \"monokex.h\""
     ; "#include \"monocypher.h\""
@@ -10,6 +10,7 @@ let print_prefix : out_channel -> unit = fun c ->
     ; "#define RANDOM_INPUT(name, size) u8 name[size]; p_random(name, size)"
     ; ""
     ; "typedef uint8_t u8;"
+    ; ""
     ]
 
 let test_function : string -> P.protocol -> string = fun pattern p ->
@@ -43,6 +44,4 @@ let test_function : string -> P.protocol -> string = fun pattern p ->
   ^ "    test_pattern(&client, &server, pid);\n"
   ^ "}\n"
 
-let print_pattern : out_channel -> string -> Proto.protocol -> unit =
-  fun c pattern p ->
-  output_string c ("\n" ^ test_function pattern p)
+let pattern pattern p = "\n" ^ test_function pattern p
