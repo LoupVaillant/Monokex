@@ -243,16 +243,15 @@ let header_prefix_lines =
 
 let header_suffix_lines = [ "#endif // MONOKEX_H" ]
 
-let source_prefix_lines =
-  [ "#include \"monocypher.h\""
-  ; "#include \"monokex.h\""
+let source_prefix1_lines =
+  [ "#include \"monokex.h\""
   ; ""
   ; "/////////////////"
   ; "/// Utilities ///"
   ; "/////////////////"
   ; "#define FOR(i, start, end)  for (size_t i = (start); (i) < (end); (i)++)"
-  ; "#define WIPE_CTX(ctx)       crypto_wipe(ctx   , sizeof(*(ctx)))"
-  ; "#define WIPE_BUFFER(buffer) crypto_wipe(buffer, sizeof(buffer))"
+  ; "#define WIPE_CTX(ctx)       wipe(ctx   , sizeof(*(ctx)))"
+  ; "#define WIPE_BUFFER(buffer) wipe(buffer, sizeof(buffer))"
   ; ""
   ; "typedef uint8_t   u8;"
   ; "typedef uint16_t u16;"
@@ -280,6 +279,14 @@ let source_prefix_lines =
   ; ""
   ; "static const u8 zero[8] = {0};"
   ; ""
+  ; "////////////////////"
+  ; "/// Dependencies ///"
+  ; "////////////////////"
+  ; ""
+  ]
+
+let source_prefix2_lines =
+  [ ""
   ; "/////////////////////"
   ; "/// State machine ///"
   ; "/////////////////////"
@@ -287,15 +294,14 @@ let source_prefix_lines =
   ; ""
   ; "void kex_mix_hash("^prefix^"ctx *ctx, const u8 *input, size_t input_size)"
   ; "{"
-  ; "    crypto_blake2b_general("
-    ^       "ctx->hash, 64, ctx->hash, 64, input, input_size);"
+  ; "    keyed_hash(ctx->hash, ctx->hash, input, input_size);"
   ; "}"
   ; ""
   ; "static void kex_extra_hash(" ^ prefix ^ "ctx *ctx, u8 out[64])"
   ; "{"
   ; "    u8 one [1] = {1};"
-  ; "    crypto_blake2b_general(ctx->hash, 64, ctx->hash, 64, zero, 1);"
-  ; "    crypto_blake2b_general(out      , 64, ctx->hash, 64,  one, 1);"
+  ; "    keyed_hash(ctx->hash, ctx->hash, zero, 1);"
+  ; "    keyed_hash(out      , ctx->hash,  one, 1);"
   ; "}"
   ; ""
   ; "static void kex_update_key(" ^ prefix ^ "ctx *ctx,"
@@ -303,7 +309,7 @@ let source_prefix_lines =
   ; "                           const u8 public_key[32])"
   ; "{"
   ; "    u8 tmp[32];"
-  ; "    crypto_x25519(tmp, secret_key, public_key);"
+  ; "    key_exchange(tmp, secret_key, public_key);"
   ; "    kex_mix_hash(ctx, tmp, 32);"
   ; "    ctx->flags |= HAS_KEY;"
   ; "    WIPE_BUFFER(tmp);"
@@ -323,7 +329,7 @@ let source_prefix_lines =
   ; "    if (!(ctx->flags & HAS_KEY)) { return 0; }"
   ; "    u8 real_tag[64]; // actually 16 useful bytes"
   ; "    kex_extra_hash(ctx, real_tag);"
-  ; "    if (crypto_verify16(tag, real_tag)) {"
+  ; "    if (verify16(tag, real_tag)) {"
   ; "        WIPE_CTX(ctx);"
   ; "        WIPE_BUFFER(real_tag);"
   ; "        return -1;"
@@ -356,7 +362,7 @@ let source_prefix_lines =
   ; "    // we have a key, we encrypt"
   ; "    u8 key[64]; // actually 32 useful bytes"
   ; "    kex_extra_hash(ctx, key);"
-  ; "    crypto_chacha20(msg, src, size, key, zero);"
+  ; "    encrypt(msg, src, size, key);"
   ; "    kex_mix_hash(ctx, msg, size);"
   ; "    kex_auth(ctx, msg + size);"
   ; "    WIPE_BUFFER(key);"
@@ -377,7 +383,7 @@ let source_prefix_lines =
   ; "        WIPE_BUFFER(key);"
   ; "        return -1;"
   ; "    }"
-  ; "    crypto_chacha20(dest, msg, size, key, zero);"
+  ; "    encrypt(dest, msg, size, key);"
   ; "    WIPE_BUFFER(key);"
   ; "    return 0;"
   ; "}"
@@ -410,21 +416,16 @@ let source_prefix_lines =
   ; "{"
   ; "    // Note we only use the second half of the pool for now."
   ; "    // The first half will be used later to re-generate the pool."
-  ; "    crypto_chacha20(ctx->pool, 0, 64, random_seed, zero);"
-  ; "    crypto_wipe(random_seed, 32); // auto wipe seed to avoid reuse"
-  ; "#ifndef DISABLE_ELLIGATOR"
-  ; "    crypto_hidden_key_pair(ctx->ep, ctx->e, ctx->pool + 32);"
-  ; "#else"
-  ; "    copy(ctx->e, ctx->pool + 32, 32);"
-  ; "    crypto_x25519_public_key(ctx->ep, ctx->e);"
-  ; "#endif"
+  ; "    encrypt(ctx->pool, 0, 64, random_seed);"
+  ; "    wipe(random_seed, 32); // auto wipe seed to avoid reuse"
+  ; "    ephemeral_key_pair(ctx->ep, ctx->e, ctx->pool + 32);"
   ; "}"
   ; ""
   ; "static void kex_locals(" ^
       prefix ^ "ctx *ctx, const u8 s[32], const u8 sp[32])"
   ; "{"
-  ; "    if (sp == 0) { crypto_x25519_public_key(ctx->sp, s);      }"
-  ; "    else         { copy                    (ctx->sp, sp, 32); }"
+  ; "    if (sp == 0) { static_public_key(ctx->sp, s);      }"
+  ; "    else         { copy             (ctx->sp, sp, 32); }"
   ; "    copy(ctx->s, s, 32);"
   ; "}"
   ; ""
@@ -465,17 +466,16 @@ let source_prefix_lines =
   ; "        switch (kex_next_token(ctx)) {"
   ; "        case E : kex_read_raw(ctx, ctx->er, m, 32);"
   ; "                 m += 32;"
-  ; "#ifndef DISABLE_ELLIGATOR"
-  ; "                 crypto_hidden_to_curve(ctx->er, ctx->er);"
-  ; "#endif"
+  ; "                 decode_ephemeral_key(ctx->er);"
   ; "                 break;"
   ; "        case S : if (kex_read(ctx, ctx->sr, m, 32)) { return -1; }"
   ; "                 m += 32 + tag_size;"
-  ; "                 ctx->flags |= HAS_REMOTE;                     break;"
-  ; "        case EE: kex_update_key(ctx, ctx->e, ctx->er);         break;"
-  ; "        case ES: kex_update_key(ctx, ctx->e, ctx->sr);         break;"
-  ; "        case SE: kex_update_key(ctx, ctx->s, ctx->er);         break;"
-  ; "        case SS: kex_update_key(ctx, ctx->s, ctx->sr);         break;"
+  ; "                 ctx->flags |= HAS_REMOTE;"
+  ; "                 break;"
+  ; "        case EE: kex_update_key(ctx, ctx->e, ctx->er); break;"
+  ; "        case ES: kex_update_key(ctx, ctx->e, ctx->sr); break;"
+  ; "        case SE: kex_update_key(ctx, ctx->s, ctx->er); break;"
+  ; "        case SS: kex_update_key(ctx, ctx->s, ctx->sr); break;"
   ; "        default:; // never happens"
   ; "        }"
   ; "    }"
@@ -537,8 +537,8 @@ let source_prefix_lines =
   ; "        // Regenerate the pool with its first half,"
   ; "        // then use the second half for padding."
   ; "        // That way we keep the first half of the pool fresh."
-  ; "        crypto_chacha20(ctx->pool, 0, 64, ctx->pool, zero);"
-  ; "        crypto_chacha20(m, 0, pad_size, ctx->pool + 32, zero);"
+  ; "        encrypt(ctx->pool, 0, 64, ctx->pool);"
+  ; "        encrypt(m, 0, pad_size, ctx->pool + 32);"
   ; "    }"
   ; "}"
   ; ""
@@ -598,11 +598,13 @@ let source_prefix_lines =
   ; "        :                             " ^ prefix_caps ^ "READ;"
   ; "}"
   ; ""
+  ; ""
   ]
 
-let header_prefix = String.concat "\n" header_prefix_lines
-let header_suffix = String.concat "\n" header_suffix_lines
-let source_prefix = String.concat "\n" source_prefix_lines
+let header_prefix  = String.concat "\n" header_prefix_lines
+let header_suffix  = String.concat "\n" header_suffix_lines
+let source_prefix1 = String.concat "\n" source_prefix1_lines
+let source_prefix2 = String.concat "\n" source_prefix2_lines
 
 (* Specific source code *)
 let block_comment comment =
@@ -634,6 +636,8 @@ let header protocols =
   header_prefix
   ^ String.concat "\n" (map_pair header_pattern protocols)
   ^ header_suffix
-let source protocols =
-  source_prefix
+let source protocols dependencies =
+  source_prefix1
+  ^ dependencies
+  ^ source_prefix2
   ^ String.concat "\n" (map_pair source_pattern protocols)
