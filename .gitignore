@@ -1,6 +1,7 @@
 *.cmi
 *.cmo
-gen/*
+classic/*
+elligator/*
 *.out
 *~
 

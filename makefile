@@ -17,7 +17,7 @@ CMO = $(patsubst %.ml, %.cmo, $(SRC))
 CC     = gcc -std=gnu99
 CFLAGS = -pedantic -Wall -Wextra
 
-.PHONY: all clean repl
+.PHONY: all clean repl gen
 
 all: gen src/repl.out
 repl: src/repl.out
@@ -25,11 +25,12 @@ clean:
 	rm -f src/*.cmi src/*.cmo
 	rm -f src/scan.ml
 	rm -f *.out src/*.out
-	rm -rf gen
+	rm -rf classic elligator
 
 gen: gen.out protocols.txt
 	./gen.out < protocols.txt
-	(cd gen; make test)
+	(cd classic;   make test)
+	(cd elligator; make test)
 
 gen.out: src/main.ml $(CMO)
 	ocamlc $(OFLAGS) str.cma unix.cma $(CMO) $< -o $@
