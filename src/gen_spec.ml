@@ -7,69 +7,55 @@ let keys : P.protocol -> string = fun p ->
   let actions  = P.all_keys p                           in
   let kk k txt = if List.mem k actions then txt else "" in
   ""
-  ^ kk P.IS "- __(is, IS)__ The initiator's static key.\n"
-  ^ kk P.IE "- __(ie, IE)__ The initiator's ephemeral key.\n"
-  ^ kk P.RS "- __(rs, RS)__ The responder's static key.\n"
-  ^ kk P.RE "- __(re, RE)__ The responder's ephemeral key.\n"
+  ^ kk P.IS "- __(is, IS)__ Initiator's static key.\n"
+  ^ kk P.IE "- __(ie, IE)__ Initiator's ephemeral key.\n"
+  ^ kk P.RS "- __(rs, RS)__ Responder's static key.\n"
+  ^ kk P.RE "- __(re, RE)__ Responder's ephemeral key.\n"
 
 let secrets p =
   P.all_exchanges p
   /@ (function
-      | (P.S, P.S) -> "- __ss__ = X25519(is, RS) = X25519(rs, IS)\n"
-      | (P.S, P.E) -> "- __se__ = X25519(is, RE) = X25519(re, IS)\n"
-      | (P.E, P.S) -> "- __es__ = X25519(ie, RS) = X25519(rs, IE)\n"
-      | (P.E, P.E) -> "- __ee__ = X25519(ie, RE) = X25519(re, IE)\n")
+      | (P.S, P.S) -> "- __ss__ = DH(is, RS) = DH(rs, IS)\n"
+      | (P.S, P.E) -> "- __se__ = DH(is, RE) = DH(re, IS)\n"
+      | (P.E, P.S) -> "- __es__ = DH(ie, RS) = DH(rs, IE)\n"
+      | (P.E, P.E) -> "- __ee__ = DH(ie, RE) = DH(re, IE)\n")
   |> String.concat ""
 
 let string_of_hash = function
-  | L.Hash i -> "H" ^ string_of_int i
-  | L.Htag i -> "T" ^ string_of_int i
-  | L.Hkey i -> "K" ^ string_of_int i
+  | L.Hash  h     -> "H" ^ string_of_int h
+  | L.Htag (h, t) -> "H" ^ string_of_int h ^ ", T" ^ string_of_int t
+  | L.Hkey (h, k) -> "H" ^ string_of_int h ^ ", K" ^ string_of_int k
 
 let string_of_plain = function
   | L.Payload i -> "p" ^ string_of_int i
   | L.Key k     -> P.string_of_key k
 
+let string_of_enc p i =
+  "ENC(K" ^ string_of_int i ^ ", " ^ string_of_plain p ^ ")"
+
 let string_of_crypt = function
   | L.Plain p      -> string_of_plain p
-  | L.Crypt (p, i) -> "Chacha20(K" ^ string_of_int i
-                      ^ ", " ^ string_of_plain p ^ ")"
-
-let string_of_mix_input = function
-  | L.Hcrypt c   -> string_of_crypt c
-  | L.Exchange e -> P.string_of_exchange e
-  | L.Prelude    -> "prelude"
-  | L.Zero       -> "zero"
-  | L.One        -> "one"
+  | L.Crypt (p, i) -> string_of_enc p i
 
 let string_of_msg_part = function
-  | L.Mcrypt c -> string_of_crypt c
-  | L.Mtag   i -> "T" ^ string_of_int i
+  | L.Plain p      -> string_of_plain p
+  | L.Crypt (p, i) -> string_of_enc p i ^ " || T" ^ string_of_int i
 
 let grid_left_of_mix mix =
   "- __" ^ string_of_hash mix.L.next ^ "__"
 
 let grid_right_of_mix mix =
-  let prefix = " = Blake2b(H" ^ string_of_int mix.L.prev      in
-  let middle = " || " ^ string_of_mix_input mix.L.input ^ ")" in
-  let suffix =
-    (match mix.L.fallback with
-     | None   -> ""
-     | Some f ->
-        let finish    = ", H" ^ string_of_int f ^ " otherwise"         in
-        let prelude   = " if there is a prelude"                       in
-        let payload i = " if msg" ^ string_of_int i ^ " has a payload" in
-        (match mix.L.input with
-         | L.Prelude                           -> prelude   ^ finish
-         | L.Hcrypt L.Plain  (L.Payload i)     -> payload i ^ finish
-         | L.Hcrypt L.Crypt ((L.Payload i), _) -> payload i ^ finish
-         | _                                   -> error "grid_right_of_mix"))
-  in [prefix; middle ^ suffix ^ "\n"]
+  let prev = string_of_int (mix.L.prev) in
+  match mix.L.input with
+  | L.Hcrypt c   -> [ " = KDF(H" ^ prev; ", " ^ string_of_crypt c      ^ ")\n"]
+  | L.Exchange e -> [ " = KDF(H" ^ prev; ", " ^ P.string_of_exchange e ^ ")\n"]
+  | L.Prelude    -> [ " = KDF(H" ^ prev; ", " ^ "prelude"              ^ ")\n"]
+  | L.No_input   -> [ " = ENC(H" ^ prev; ", " ^ "Zero"                 ^ ")\n"]
 
 let string_of_hashes pattern hashes =
   let left  = "- __H0__" :: (hashes /@ grid_left_of_mix) in
   let right = (" = \"Monokex " ^ pattern ^ "\""
-               ^ " (ASCII, 64 bytes, zero padded)\n")
+               ^ " (ASCII, 32 bytes, zero padded)\n")
               :: grid (hashes /@ grid_right_of_mix)      in
   map2 (fun a b -> [a; b]) left right
   |> grid
@@ -106,7 +92,7 @@ let amplified_messages p =
                                ^ "containing " ^ to_str (msg+1)
                                ^ (if Proto.first_server_payload p > (msg + 1)
                                   then ""
-                                  else " (and its payload, if any)"))       in
+                                  else " (and its payload)"))               in
   let messages = String.concat " and " (requests /@ to_str)                 in
   match warnings with
   | [] -> "" (* No amplified message at all *)
@@ -117,21 +103,21 @@ let amplified_messages p =
 
 let handshake : P.protocol -> string = fun p ->
   let send sender receiver msg_num =
-    "- The "          ^ sender
+    "- "              ^ sender
     ^ " sends msg"    ^ string_of_int msg_num
     ^ " to the "      ^ receiver
     ^ ".\n"                                      in
   let receive ex receiver msg_num =
     if ex
-    then "- The "          ^ receiver
+    then "- "              ^ receiver
          ^ " verifies msg" ^ string_of_int msg_num
          ^ ", and aborts if it fails.\n"
-    else "- The "          ^ receiver
+    else "- "              ^ receiver
          ^ " receives msg" ^ string_of_int msg_num
          ^ ".\n"                                 in
   let transmit sender receiver =
-    "- The "          ^ receiver
-    ^ " checks the "  ^ sender
+    "- "          ^ receiver
+    ^ " checks "  ^ sender
     ^ "'s static key, and aborts if it fails.\n" in
   let rec messages sender receiver msg_num ex = function
     | []      -> ""
@@ -147,8 +133,8 @@ let handshake : P.protocol -> string = fun p ->
                      receiver sender
                      (msg_num + 1) nex ms        in
   let msgs = snd (P.cs_protocol p)               in
-  (messages "initiator" "responder" 1 0 msgs)
-  ^ "- The protocol is complete.  The session keys are the two halves of "
+  (messages "Initiator" "Responder" 1 0 msgs)
+  ^ "- The protocol is complete.  The session key is "
   ^ get_last_hash (L.log_of_protocol p)
   ^ ".\n"
 
@@ -158,7 +144,7 @@ let spec1 : string -> P.protocol -> string =
     [ pattern
     ; (String.make (max 3 (String.length pattern)) '=')
     ; ""
-    ; "Sender and recipient have the following X25519 key pairs (private half"
+    ; "Sender and recipient have the following DH key pairs (private half"
     ; "in lower case, public half in upper case):"
     ; ""
     ; (keys p)
@@ -166,10 +152,10 @@ let spec1 : string -> P.protocol -> string =
     ; ""
     ; (secrets p)
     ; "Those shared secrets are hashed to derive the following keys"
-    ; "(`||`denotes concatenation, zero and one are one byte numbers):"
+    ; "(zero is a string of zero bytes):"
     ; ""
     ; (get_hashes pattern (L.log_of_protocol p))
-    ; "The messages contain the following (the payloads \"p*\" are optional):"
+    ; "The messages contain the following (`||`denotes concatenation):"
     ; ""
     ; (get_messages (L.log_of_protocol p))
     ; (pre_shared p)
