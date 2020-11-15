@@ -15,13 +15,7 @@ typedef uint64_t u64;
 ////////////////////
 #include "monocypher.h"
 
-static void kdf0(u8 next[64], const u8 prev[32])
-{
-    u8 zero[8] = {0};
-    crypto_chacha20(next, 0, 64, prev, zero);
-}
-
-static void kdf1(u8 next[64], const u8 prev[32], const u8 *in, size_t size)
+static void kdf(u8 next[64], const u8 prev[32], const u8 *in, size_t size)
 {
     crypto_blake2b_general(next, 48, prev, 32, in, size);
 }
@@ -225,14 +219,14 @@ static void load_pattern(action pattern[4][5], const crypto_kex_ctx *ctx)
 
 static void mix_hash(u8 hash[64], const u8 *in, size_t size)
 {
-    kdf1(hash, hash, in, size);
+    kdf(hash, hash, in, size);
 }
 
 static void e_mix_hash(u8 hash[64], const u8 *in, size_t size)
 {
     u8 *key = hash + 32;
     u8  tmp[128];
-    kdf0(hash, hash);            // split an encryption key
+    encrypt(hash, 0, 64, hash);  // split an encryption key
     encrypt(tmp, in, size, key);
     mix_hash(hash, tmp , size);  // absorb encrypted message
 }
@@ -296,11 +290,11 @@ static void session_vectors(outputs              *out,
     memcpy(hash, pattern_id, 32);
     if (server->flags & HAS_REMOTE) {
         assert(!memcmp(client->sp, server->sr, 32));
-        kdf1(hash, hash, client->sp, 32);
+        kdf(hash, hash, client->sp, 32);
     }
     if (client->flags & HAS_REMOTE) {
         assert(!memcmp(server->sp, client->sr, 32));
-        kdf1(hash, hash, server->sp, 32);
+        kdf(hash, hash, server->sp, 32);
     }
     assert(!memcmp(client->hash, hash, 32)); // check client initial hash
     assert(!memcmp(server->hash, hash, 32)); // check server initial hash
