@@ -49,8 +49,9 @@ let grid_right_of_mix mix =
   match mix.L.input with
   | L.Hcrypt c   -> [ " = KDF(H" ^ prev; ", " ^ string_of_crypt c      ^ ")\n"]
   | L.Exchange e -> [ " = KDF(H" ^ prev; ", " ^ P.string_of_exchange e ^ ")\n"]
-  | L.Prelude    -> [ " = KDF(H" ^ prev; ", " ^ "prelude"              ^ ")\n"]
-  | L.No_input   -> [ " = ENC(H" ^ prev; ", " ^ "Zero"                 ^ ")\n"]
+  | L.No_input   -> [ " = ENC(H" ^ prev; ", Zero)\n"]
+  | L.Prelude    -> [ " = KDF(H" ^ prev
+                    ; ", prelude) if there is a prelude, H"^prev^" otherwise\n"]
 
 let string_of_hashes pattern hashes =
   let left  = "- __H0__" :: (hashes /@ grid_left_of_mix) in
