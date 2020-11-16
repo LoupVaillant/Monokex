@@ -15,7 +15,7 @@ typedef uint64_t u64;
 ////////////////////
 #include "monocypher.h"
 
-static void kdf(u8 next[64], const u8 prev[32], const u8 *in, size_t size)
+static void kdf(u8 next[48], const u8 prev[32], const u8 *in, size_t size)
 {
     crypto_blake2b_general(next, 48, prev, 32, in, size);
 }
@@ -351,7 +351,7 @@ static void session(outputs              *co, // client out
     if (in->prelude) {
         crypto_kex_add_prelude(&c, in->prelude, in->prelude_size);
         crypto_kex_add_prelude(&s, in->prelude, in->prelude_size);
-        assert(!memcmp(c.hash, s.hash, 64));
+        assert(!memcmp(c.hash, s.hash, 48));
     }
 
     // Protocol

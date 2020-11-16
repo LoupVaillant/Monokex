@@ -373,7 +373,7 @@ let source_prefix2_lines =
   ; "//////////////////////"
   ; "static void kex_init(" ^ prefix ^ "ctx *ctx, const u8 pid[32])"
   ; "{"
-  ; "    copy(ctx->hash, pid, 64);"
+  ; "    copy(ctx->hash, pid, 32);"
   ; "    ctx->flags = IS_OK;"
   ; "}"
   ; ""
