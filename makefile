@@ -6,6 +6,7 @@ SRC = src/utils.ml       \
       src/parsec.ml      \
       src/validate.ml    \
       src/proto_log.ml   \
+      src/proto_run.ml   \
       src/gen_spec.ml    \
       src/gen_code.ml    \
       src/gen_test.ml    \

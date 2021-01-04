@@ -1,169 +1,220 @@
 open Utils
 module P = Proto
 module L = Proto_log
+module R = Proto_run
 
-(* Convert protocol to specs *)
-let keys : P.protocol -> string = fun p ->
-  let actions  = P.all_keys p                           in
-  let kk k txt = if List.mem k actions then txt else "" in
-  ""
-  ^ kk P.IS "- __(is, IS)__ Initiator's static key.\n"
-  ^ kk P.IE "- __(ie, IE)__ Initiator's ephemeral key.\n"
-  ^ kk P.RS "- __(rs, RS)__ Responder's static key.\n"
-  ^ kk P.RE "- __(re, RE)__ Responder's ephemeral key.\n"
+type fsm = { hash    : int
+           ; has_key : bool
+           ; key     : int
+           ; tag     : int
+           }
+let fsm_0 = { hash    = 0
+            ; has_key = false
+            ; key     = 1
+            ; tag     = 1
+            }
 
-let secrets p =
-  P.all_exchanges p
-  /@ (function
-      | (P.S, P.S) -> "- __ss__ = DH(is, RS) = DH(rs, IS)\n"
-      | (P.S, P.E) -> "- __se__ = DH(is, RE) = DH(re, IS)\n"
-      | (P.E, P.S) -> "- __es__ = DH(ie, RS) = DH(rs, IE)\n"
-      | (P.E, P.E) -> "- __ee__ = DH(ie, RE) = DH(re, IE)\n")
-  |> String.concat ""
+let inc_hash i fsm = { fsm with hash    = fsm.hash + i }
+let inc_key    fsm = { fsm with key     = fsm.key  + 1 }
+let inc_tag    fsm = { fsm with tag     = fsm.tag  + 1 }
+let get_key    fsm = { fsm with has_key = true         }
+let up_kex fsm = fsm |> inc_hash 1 |> get_key
+let up_raw fsm = fsm |> inc_hash 1
+let up_enc fsm = fsm |> inc_hash 2 |> inc_key |> inc_tag
+let up_pld fsm = if fsm.has_key then up_enc fsm else up_raw fsm
 
-let string_of_hash = function
-  | L.Hash  h     -> "H" ^ string_of_int h
-  | L.Htag (h, t) -> "H" ^ string_of_int h ^ ", T" ^ string_of_int t
-  | L.Hkey (h, k) -> "H" ^ string_of_int h ^ ", K" ^ string_of_int k
+let fsm_hash fsm = "H" ^ string_of_int fsm.hash
+let fsm_key  fsm = "K" ^ string_of_int fsm.key
+let fsm_tag  fsm = "T" ^ string_of_int fsm.tag
 
-let string_of_plain = function
-  | L.Payload i -> "p" ^ string_of_int i
-  | L.Key k     -> P.string_of_key k
+let update action fsm = match action with
+  | R.E  -> up_raw fsm
+  | R.S  -> up_pld fsm
+  | R.EE -> up_kex fsm
+  | R.ES -> up_kex fsm
+  | R.SE -> up_kex fsm
+  | R.SS -> up_kex fsm
+  | R.Pa -> up_pld fsm
+  | R.H0 -> fsm
+  | R.IS -> up_raw fsm
+  | R.RS -> up_raw fsm
+  | R.Pr -> up_raw fsm
 
-let string_of_enc p i =
-  "ENC(K" ^ string_of_int i ^ ", " ^ string_of_plain p ^ ")"
+type cs = Client | Server
 
-let string_of_crypt = function
-  | L.Plain p      -> string_of_plain p
-  | L.Crypt (p, i) -> string_of_enc p i
+let send_action pattern cs payload action (fsm, desc, msg) =
+  let out_fsm   = update action fsm                                       in
+  let ls        = match cs with Client -> "i" | Server -> "r"             in
+  let lp        = match cs with Client -> "I" | Server -> "R"             in
+  let rp        = match cs with Client -> "R" | Server -> "I"             in
+  let h0        = "H" ^ lp ^ string_of_int  out_fsm.hash                  in
+  let h1        = "H" ^ lp ^ string_of_int (out_fsm.hash - 1)             in
+  let h2        = "H" ^ lp ^ string_of_int (out_fsm.hash - 2)             in
+  let k         = "K" ^ lp ^ string_of_int out_fsm.key                    in
+  let t         = "T" ^ lp ^ string_of_int out_fsm.tag                    in
+  let ep        = "E" ^ lp                                                in
+  let es        = "e" ^ ls                                                in
+  let er        = "E" ^ rp                                                in
+  let sp        = "S" ^ lp                                                in
+  let ss        = "s" ^ ls                                                in
+  let sr        = "S" ^ rp                                                in
+  let rkdf    p = ["    "  ^ h0          ; " = KDF("^ h1 ^", "^   p ^")"] in
+  let ekdf1     = ["    "  ^ h1  ^", "^ k; " = ENC("^ h2 ^", "^  "Zero)"] in
+  let ekdf2   p = ["    E_"^ p           ; " = ENC("^ k  ^", "^   p ^")"] in
+  let ekdf3   p = ["    "  ^ h0  ^", "^ t; " = KDF("^ h1 ^", E_"^ p ^")"] in
+  let raw_kdf p = rkdf p :: desc                                          in
+  let enc_kdf p = if out_fsm.has_key
+                   then ekdf3 p :: ekdf2 p :: ekdf1 :: desc
+                   else rkdf p                      :: desc               in
+  let raw_pld  p = p :: msg                                               in
+  let enc_pld  p = (if out_fsm.has_key
+                    then "E_" ^ p ^ " || " ^ t
+                    else p
+                   ) :: msg                                               in
+  match action with
+  | R.H0 -> (out_fsm, ["    "^ h0; " = H0"] :: desc, msg)
+  | R.IS -> (out_fsm, raw_kdf "IS"                 , msg)
+  | R.RS -> (out_fsm, raw_kdf "RS"                 , msg)
+  | R.Pr -> (out_fsm, raw_kdf "prelude"            , msg)
+  | R.E  -> (out_fsm, raw_kdf ep     , raw_pld ep     )
+  | R.S  -> (out_fsm, enc_kdf sp     , enc_pld sp     )
+  | R.Pa -> (out_fsm, enc_kdf payload, enc_pld payload)
+  | R.EE -> (out_fsm, raw_kdf ("DH("^ es ^", "^ er ^")"), msg)
+  | R.ES -> (out_fsm, raw_kdf ("DH("^ es ^", "^ sr ^")"), msg)
+  | R.SE -> (out_fsm, raw_kdf ("DH("^ ss ^", "^ er ^")"), msg)
+  | R.SS -> (out_fsm, raw_kdf ("DH("^ ss ^", "^ sr ^")"), msg)
 
-let string_of_msg_part = function
-  | L.Plain p      -> string_of_plain p
-  | L.Crypt (p, i) -> string_of_enc p i ^ " || T" ^ string_of_int i
+let read_action pattern cs payload action (fsm, desc) =
+  let out_fsm   = update action fsm                                        in
+  let ls        = match cs with Client -> "i" | Server -> "r"              in
+  let lp        = match cs with Client -> "I" | Server -> "R"              in
+  let rp        = match cs with Client -> "R" | Server -> "I"              in
+  let h0        = "H" ^ lp ^ string_of_int  out_fsm.hash                   in
+  let h1        = "H" ^ lp ^ string_of_int (out_fsm.hash - 1)              in
+  let h2        = "H" ^ lp ^ string_of_int (out_fsm.hash - 2)              in
+  let k         = "K" ^ lp ^ string_of_int out_fsm.key                     in
+  let lt        = "T" ^ lp ^ string_of_int out_fsm.tag                     in
+  let rt        = "T" ^ rp ^ string_of_int out_fsm.tag                     in
+  let es        = "e" ^ ls                                                 in
+  let er        = "E" ^ rp                                                 in
+  let ss        = "s" ^ ls                                                 in
+  let sr        = "S" ^ rp                                                 in
+  let rkdf    p = ["    "  ^ h0           ; " = KDF("^ h1 ^", "^   p ^")"] in
+  let ekdf1     = ["    "  ^ h1  ^", "^ k ; " = ENC("^ h2 ^", "^  "Zero)"] in
+  let ekdf2   p = ["    "  ^ h0  ^", "^ lt; " = KDF("^ h1 ^", E_"^ p ^")"] in
+  let ekdf3     = ["    "; "!!ASSERT("^ rt ^" == "^ lt ^")"]               in
+  let ekdf4   p = ["    "  ^ p            ; " = DEC("^ k  ^", E_"^ p ^")"] in
+  let raw_kdf p = rkdf p :: desc                                           in
+  let enc_kdf p = if out_fsm.has_key
+                   then ekdf4 p :: ekdf3 :: ekdf2 p :: ekdf1 :: desc
+                   else rkdf p                               :: desc       in
+  match action with
+  | R.H0 -> (out_fsm, ["    "^ h0; " = H0"] :: desc)
+  | R.IS -> (out_fsm, raw_kdf "IS")
+  | R.RS -> (out_fsm, raw_kdf "RS")
+  | R.Pr -> (out_fsm, raw_kdf "prelude")
+  | R.E  -> (out_fsm, raw_kdf er)
+  | R.S  -> (out_fsm, enc_kdf sr)
+  | R.Pa -> (out_fsm, enc_kdf payload)
+  | R.EE -> (out_fsm, raw_kdf ("DH("^ es ^", "^ er ^")"))
+  | R.ES -> (out_fsm, raw_kdf ("DH("^ es ^", "^ sr ^")"))
+  | R.SE -> (out_fsm, raw_kdf ("DH("^ ss ^", "^ er ^")"))
+  | R.SS -> (out_fsm, raw_kdf ("DH("^ ss ^", "^ sr ^")"))
 
-let grid_left_of_mix mix =
-  "- __" ^ string_of_hash mix.L.next ^ "__"
+let send_message pattern cs payload actions fsm =
+  (fsm, [], [])
+  |> R.log_actions (send_action pattern cs payload) actions
+  |> fun (fsm, description, message) ->
+     ( fsm,
+       ["    "; "!!-> " ^ (message |> List.rev |> String.concat " || ")]
+       :: description)
 
-let grid_right_of_mix mix =
-  let prev = string_of_int (mix.L.prev) in
-  match mix.L.input with
-  | L.Hcrypt c   -> [ " = KDF(H" ^ prev; ", " ^ string_of_crypt c      ^ ")\n"]
-  | L.Exchange e -> [ " = KDF(H" ^ prev; ", " ^ P.string_of_exchange e ^ ")\n"]
-  | L.No_input   -> [ " = ENC(H" ^ prev; ", Zero)\n"]
-  | L.Prelude    -> [ " = KDF(H" ^ prev
-                    ; ", prelude) if there is a prelude, H"^prev^" otherwise\n"]
+let read_message pattern cs payload actions fsm =
+  (fsm, [])
+  |> R.log_actions (read_action pattern cs payload) actions
 
-let string_of_hashes pattern hashes =
-  let left  = "- __H0__" :: (hashes /@ grid_left_of_mix) in
-  let right = (" = \"Monokex " ^ pattern ^ "\""
-               ^ " (ASCII, 32 bytes, zero padded)\n")
-              :: grid (hashes /@ grid_right_of_mix)      in
-  map2 (fun a b -> [a; b]) left right
+type state = { client : fsm
+             ; server : fsm
+             ; msg    : int
+             ; out    : string list list list
+             }
+
+let run_protocol pattern =
+  let payload st  = "PLD" ^ string_of_int st.msg                    in
+  let client_read actions st =
+    let out, str = read_message pattern Client (payload st) actions st.client
+    in {st with
+         client = out;
+         msg    = st.msg + 1;
+         out    = ([""; "<<Initiator:"] :: List.rev str) :: st.out} in
+  let server_read actions st =
+    let out, str = read_message pattern Server (payload st) actions st.server
+    in {st with
+         server = out;
+         msg    = st.msg + 1;
+         out    = ([""; "<<Responder:"] :: List.rev str) :: st.out} in
+  let client_write actions st =
+    let out, str = send_message pattern Client (payload st) actions st.client
+    in {st with
+         client = out;
+         out    = List.rev str :: st.out}                           in
+  let server_write actions st =
+    let out, str = send_message pattern Server (payload st) actions st.server
+    in {st with
+         server = out;
+         out    = List.rev str :: st.out}                           in
+  let st0 = { client = fsm_0
+            ; server = fsm_0
+            ; msg    = 1
+            ; out    = []
+            } in
+  fun p ->
+  let st = R.act_protocol
+             client_read client_write
+             server_read server_write
+             p st0
+  in
+  st.out
+  |> cons [ []
+           ;[""; "<<The session key is "
+                 ^ "HI" ^ string_of_int st.client.hash ^ " == "
+                 ^ "HR" ^ string_of_int st.server.hash]]
+  |> List.rev
+  |> List.concat
+  |> cons [""; "<<Initiator:"]
   |> grid
-  |> String.concat ""
+  |> List.map (Str.global_replace (Str.regexp " *<<") "")
+  |> List.map (Str.global_replace (Str.regexp " *!!") "    ")
+  |> String.concat "\n"
 
-let string_of_message msg_nb message =
-  "- __msg" ^ string_of_int msg_nb ^ "__ = "
-  ^ String.concat " || " (message /@ string_of_msg_part)
-  ^ "\n"
-
-let string_of_messages messages = mapi 1 string_of_message messages
-                                  |> String.concat ""
-
-let get_last_hash      st = "H" ^ string_of_int      st.L.last_hash
-let get_hashes pattern st = string_of_hashes pattern st.L.hashes
-let get_messages       st = string_of_messages      (st.L.messages /@ fst)
-
-let pre_shared : P.protocol -> string = fun p ->
-  match ((P.cs_protocol p |> fst |> List.concat)
-         // P.is_cs_key
-         /@ P.to_cs_key
-         /@ P.string_of_key) with
-  | []       -> ""
-  | [k1]     -> "Note that " ^ k1 ^                 " is shared in advance.\n\n"
-  | [k1; k2] -> "Note that " ^ k1 ^ " and " ^ k2 ^ " are shared in advance.\n\n"
-  | _        -> error "pre_shared"
-
-let amplified_messages p =
-  let requests = range 1 (P.nb_messages p) // P.is_amplified p              in
-  let to_str m = "msg" ^ string_of_int m                                    in
-  let warnings = requests /@
-                   (fun msg -> "the network packet containing " ^ to_str msg
-                               ^ " should be as big as the network packet "
-                               ^ "containing " ^ to_str (msg+1)
-                               ^ (if Proto.first_server_payload p > (msg + 1)
-                                  then ""
-                                  else " (and its payload)"))               in
-  let messages = String.concat " and " (requests /@ to_str)                 in
-  match warnings with
-  | [] -> "" (* No amplified message at all *)
-  | l  -> "To avoid network amplification attacks: "
-          ^ String.concat "; " l
-          ^ ". Pad " ^ messages ^ " with zeroes as necessary\n\n"
-          |> paragraph
-
-let handshake : P.protocol -> string = fun p ->
-  let send sender receiver msg_num =
-    "- "              ^ sender
-    ^ " sends msg"    ^ string_of_int msg_num
-    ^ " to the "      ^ receiver
-    ^ ".\n"                                      in
-  let receive ex receiver msg_num =
-    if ex
-    then "- "              ^ receiver
-         ^ " verifies msg" ^ string_of_int msg_num
-         ^ ", and aborts if it fails.\n"
-    else "- "              ^ receiver
-         ^ " receives msg" ^ string_of_int msg_num
-         ^ ".\n"                                 in
-  let transmit sender receiver =
-    "- "          ^ receiver
-    ^ " checks "  ^ sender
-    ^ "'s static key, and aborts if it fails.\n" in
-  let rec messages sender receiver msg_num ex = function
-    | []      -> ""
-    | m :: ms -> let nex    = ex + (m // P.is_cs_exchange |> List.length) in
-                 let did_ex = nex > 0                                     in
-                 send sender receiver msg_num
-                 ^ receive did_ex receiver msg_num
-                 ^ (if List.exists (swap List.mem [P.CS_key P.IS;
-                                                   P.CS_key P.RS]) m
-                    then transmit sender receiver
-                    else "")
-                 ^ messages
-                     receiver sender
-                     (msg_num + 1) nex ms        in
-  let msgs = snd (P.cs_protocol p)               in
-  (messages "Initiator" "Responder" 1 0 msgs)
-  ^ "- The protocol is complete.  The session key is "
-  ^ get_last_hash (L.log_of_protocol p)
-  ^ ".\n"
-
-let spec1 : string -> P.protocol -> string =
-  fun pattern p ->
+let spec1 pattern p =
   String.concat "\n"
     [ pattern
     ; (String.make (max 3 (String.length pattern)) '=')
+    ; "- H0    : 32 byte domain separation string."
+    ; "- KDF   : keyed Blake2b, 512 bits output, divided in 2 halves."
+    ; "- ENC   : Chacha20, with nonce = 0."
+    ; "- DEC   : Chacha20, with nonce = 0."
+    ; "- DH    : X25519"
+    ; "- ASSERT: Checks condition, aborts protocol if false."
+    ; "- PLD.  : Arbitrary message payloads."
+    ; "- H..   : 256-bit hashes"
+    ; "- K..   : 256-bit keys"
+    ; "- T..   : 128-bit tags"
+    ; "- Zero  : 64 byte all-zero string"
     ; ""
-    ; "Sender and recipient have the following DH key pairs (private half"
-    ; "in lower case, public half in upper case):"
+    ; (let actions  = P.all_keys p                           in
+       let kk k txt = if List.mem k actions then txt else [] in
+         ([["- H0 "; " = \"Monokex "^ pattern ^"\" (ASCII, zero padded)"]]
+          @ kk P.IS [["- is, IS"; " = Initiator's static key pair."   ]]
+          @ kk P.IE [["- ie, IE"; " = Initiator's ephemeral key pair."]]
+          @ kk P.RS [["- rs, RS"; " = Responder's static key pair."   ]]
+          @ kk P.RE [["- re, RE"; " = Responder's ephemeral key pair."]])
+         |> grid
+         |> String.concat "\n"
+      )
     ; ""
-    ; (keys p)
-    ; "Those key pairs are used to derive the following shared secrets:"
-    ; ""
-    ; (secrets p)
-    ; "Those shared secrets are hashed to derive the following keys"
-    ; "(zero is a string of zero bytes):"
-    ; ""
-    ; (get_hashes pattern (L.log_of_protocol p))
-    ; "The messages contain the following (`||`denotes concatenation):"
-    ; ""
-    ; (get_messages (L.log_of_protocol p))
-    ; (pre_shared p)
-      ^ (amplified_messages p)
-      ^ "The handshake proceeds as follows:"
-    ; ""
-    ; (handshake p)
+    ; run_protocol pattern p
     ]
-
-let spec protocols = String.concat "\n\n" (map_pair spec1 protocols)
+let spec protocols =
+    String.concat "\n\n" (map_pair spec1 protocols)
