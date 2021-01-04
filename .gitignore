@@ -2,6 +2,7 @@
 *.cmo
 classic/*
 elligator/*
+specs/*
 *.out
 *~
 

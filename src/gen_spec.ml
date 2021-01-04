@@ -187,7 +187,7 @@ let run_protocol pattern =
   |> List.map (Str.global_replace (Str.regexp " *!!") "    ")
   |> String.concat "\n"
 
-let spec1 pattern p =
+let spec1 (pattern, p) =
   String.concat "\n"
     [ pattern
     ; (String.make (max 3 (String.length pattern)) '=')
@@ -217,4 +217,4 @@ let spec1 pattern p =
     ; run_protocol pattern p
     ]
 let spec protocols =
-    String.concat "\n\n" (map_pair spec1 protocols)
+    String.concat "\n\n" (protocols /@ spec1)

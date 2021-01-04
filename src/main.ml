@@ -41,3 +41,11 @@ let _ =
   write "classic/test_core.h" (read "src/test_core.h");
   write "classic/makefile"    (read "src/makefile"   );
   write "classic/monokex.pc"  (read "src/monokex.pc" );
+
+  mkdir "specs";
+  List.iter
+    (fun (name, p) ->
+      write
+        ("specs/" ^ String.lowercase_ascii name)
+        (Gen_spec.spec1 (name, p)))
+    proto;
