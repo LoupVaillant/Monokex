@@ -206,15 +206,16 @@ let spec1 (pattern, p) =
     ; (let actions  = P.all_keys p                           in
        let kk k txt = if List.mem k actions then txt else [] in
          ([["- H0 "; " = \"Monokex "^ pattern ^"\" (ASCII, zero padded)"]]
-          @ kk P.IS [["- is, IS"; " = Initiator's static key pair."   ]]
-          @ kk P.IE [["- ie, IE"; " = Initiator's ephemeral key pair."]]
-          @ kk P.RS [["- rs, RS"; " = Responder's static key pair."   ]]
-          @ kk P.RE [["- re, RE"; " = Responder's ephemeral key pair."]])
+          @ kk P.IS [["- si, SI"; " = Initiator's static key pair."   ]]
+          @ kk P.IE [["- ei, EI"; " = Initiator's ephemeral key pair."]]
+          @ kk P.RS [["- sr, SR"; " = Responder's static key pair."   ]]
+          @ kk P.RE [["- er, ER"; " = Responder's ephemeral key pair."]])
          |> grid
          |> String.concat "\n"
       )
     ; ""
     ; run_protocol pattern p
+    ; ""
     ]
 let spec protocols =
-    String.concat "\n\n" (protocols /@ spec1)
+    String.concat "\n" (protocols /@ spec1)
