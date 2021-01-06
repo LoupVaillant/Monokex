@@ -73,8 +73,8 @@ let send_action pattern cs payload action (fsm, desc, msg) =
                    ) :: msg                                               in
   match action with
   | R.H0 -> (out_fsm, ["    "^ h0; " = H0"] :: desc, msg)
-  | R.IS -> (out_fsm, raw_kdf "IS"                 , msg)
-  | R.RS -> (out_fsm, raw_kdf "RS"                 , msg)
+  | R.IS -> (out_fsm, raw_kdf "SI"                 , msg)
+  | R.RS -> (out_fsm, raw_kdf "SR"                 , msg)
   | R.Pr -> (out_fsm, raw_kdf "prelude"            , msg)
   | R.E  -> (out_fsm, raw_kdf ep     , raw_pld ep     )
   | R.S  -> (out_fsm, enc_kdf sp     , enc_pld sp     )
@@ -110,8 +110,8 @@ let read_action pattern cs payload action (fsm, desc) =
                    else rkdf p                               :: desc       in
   match action with
   | R.H0 -> (out_fsm, ["    "^ h0; " = H0"] :: desc)
-  | R.IS -> (out_fsm, raw_kdf "IS")
-  | R.RS -> (out_fsm, raw_kdf "RS")
+  | R.IS -> (out_fsm, raw_kdf "SI")
+  | R.RS -> (out_fsm, raw_kdf "SR")
   | R.Pr -> (out_fsm, raw_kdf "prelude")
   | R.E  -> (out_fsm, raw_kdf er)
   | R.S  -> (out_fsm, enc_kdf sr)
